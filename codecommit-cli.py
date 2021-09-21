@@ -18,12 +18,15 @@ import boto3
 from boto3.dynamodb.types import Decimal
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+import difflib
 import hashlib
 import jmespath
 import json
 import os
 import re
 from rich.console import Console
+from rich.rule import Rule
+from rich.style import Style
 from rich.table import Table
 import tempfile
 import time
@@ -33,7 +36,25 @@ __version__ = '0.0.1'
 EX = ThreadPoolExecutor(max_workers=5)
 
 
+def current_repo():
+    repo = os.environ.get('CCC_REPO')
+    if repo is not None:
+        return repo
+    path_parts = os.getcwd().split(os.sep)
+    for i in range(1, len(path_parts)):
+        path = os.path.join(os.sep, *list(path_parts[0:i+1]))
+        if os.path.isdir(os.path.join(path, '.git')):
+            repo = path_parts[i]
+            break
+    return repo
+
+
+CURRENT_REPO = current_repo()
+
+
 def ptable(data, headers, title=None, colorize=None, counter=None):
+    if not isinstance(data, list):
+        data = [data]
     console = Console()
     table = Table(title=title)
     if colorize is not None:
@@ -63,7 +84,12 @@ def ptable(data, headers, title=None, colorize=None, counter=None):
                 str(rc) if counter is True else '[%s]%s' % (counter, rc)
             )
         for attr, label in _headers.items():
-            val = str(rd.get(attr, ''))
+            val = rd.get(attr)
+            if isinstance(val, datetime):
+                val = val.isoformat().split('.')[0]
+            elif val is None:
+                val = ''
+            val = str(val)
             if label in colorize:
                 (color, pattern) = colorize[label]
                 if pattern is None or re.match(pattern, val):
@@ -79,23 +105,26 @@ def ptable(data, headers, title=None, colorize=None, counter=None):
 # master/dynamodb_json/json_util.py
 def json_serial(obj):
     if isinstance(obj, datetime):
-        return obj.isoformat()
+        return obj.isoformat().split('.')[0]
     if isinstance(obj, Decimal):
         if obj % 1 > 0:
             return float(obj)
         else:
             return int(obj)
-        return float(obj)
     if isinstance(obj, set):
         return list(obj)
     raise TypeError('type not serializable')
+
+
+def jq(query, data):
+    return jmespath.search(query, data)
 
 
 def cccall(method, **kwargs):
     'call boto3 codecommit and cache responses'
     kwargs = dict(kwargs)
     nc = kwargs.pop('nc', None)  # no cache
-    cache_secs = int(os.environ.get('CODECOMMIT_CLI_CACHE_SECS', 10))
+    cache_secs = int(os.environ.get('CCC_CACHE_SECS', 10))
     cache_dir = os.path.join(
         tempfile.gettempdir(), 'codecommit-cli'
     )
@@ -120,7 +149,9 @@ def cccall(method, **kwargs):
     else:
         r = getattr(boto3.client('codecommit'), method)(**kwargs)
         if nc is not True:
-            open(cache_file, 'w').write(json.dumps(r, default=json_serial))
+            json_txt = json.dumps(r, default=json_serial)
+            # print(json_txt)
+            open(cache_file, 'w').write(json_txt)
             # print('written %s' % cache_file)
     return r
 
@@ -137,7 +168,7 @@ def get(method, **kwargs):
 
     # apply jmespath transform/query
     if q is not None:
-        data = jmespath.search(q, r)
+        data = jq(q, r)
 
     # automatically get list from first list value attr
     else:
@@ -145,6 +176,8 @@ def get(method, **kwargs):
             if isinstance(v, list):
                 data = r[k]
                 break
+        if data == [] and isinstance(r, dict):
+            data = r
 
     # filter attribute
     if f is not None:
@@ -177,7 +210,72 @@ def get(method, **kwargs):
     return data
 
 
-def get_repos(prefix, parsed_args, **kwargs):
+def print_diff(from_txt, to_txt, name=None, comments=None):
+    if comments is None:
+        comments = {}
+    console = Console(highlight=False)
+    if name is not None:
+        console.print('[bold white]%s[/]' % name)
+    from_lines = from_txt.splitlines()
+    from_lines_stripped = [line.lstrip().rstrip() for line in from_lines]
+    to_lines = to_txt.splitlines()
+    to_lines_stripped = [line.lstrip().rstrip() for line in to_lines]
+    diff = list(difflib._mdiff(
+        from_lines_stripped, to_lines_stripped, context=3
+    ))
+
+    print(json.dumps(comments, indent=2))
+
+    def leading(line):
+        _leading = ''
+        for i in range(len(line)):
+            if line[i] in ' \t':
+                _leading += line[i]
+            else:
+                break
+        return _leading
+
+    def print_line(code, from_lc, to_lc, line):
+        colors = {
+            '-': 'red',
+            '+': 'green',
+            ' ': 'white'
+        }
+        for x in '^+-':
+            line = line.replace('\x00' + x, '[bold]')
+            line = line.replace('\x01', '[/]')
+        console.print(
+            '[%s]%4s %4s: %s %s[/]' % (
+                colors[code], from_lc, to_lc, code, line
+            ),
+            highlight=False
+        )
+
+    for (_from, _to, changed) in diff:
+        if not all([_from, _to]):
+            console.print(Rule(style=Style(color='white')))
+            continue
+        (from_lc, from_line, to_lc, to_line) = (*_from, *_to)
+        if str(from_lc) != '':
+            from_line = leading(from_lines[from_lc - 1]) + from_line
+        if str(to_lc) != '':
+            to_line = leading(to_lines[to_lc - 1]) + to_line
+        if str(from_lc) == '':
+            print_line('+', from_lc, to_lc, to_line)
+        elif str(to_lc) == '':
+            print_line('-', from_lc, to_lc, from_line)
+        elif changed is True:
+            print_line('-', from_lc, to_lc, from_line)
+            print_line('+', from_lc, to_lc, to_line)
+        else:
+            print_line(' ', from_lc, to_lc, to_line)
+        if name in comments:
+            comment = comments[name].get(to_lc)
+            if comment is not None:
+                console.print('[cyan]%s[/]' % ''.join(comment))
+
+
+def repos_completer(prefix, parsed_args, **kwargs):
     return [
         v for v in get('list_repositories', q='repositories[].repositoryName')
         if v.startswith(prefix)
@@ -188,12 +286,17 @@ def get_repos(prefix, parsed_args, **kwargs):
 def repos(pattern):
     'list repos'
     ptable(
-        get('list_repositories', p='repositoryName=' + pattern),
+        get('list_repositories', f='repositoryName=' + pattern),
         ['repositoryName']
     )
 
 
-@arg('repo', completer=get_repos)
+@arg(
+    'repo',
+    completer=repos_completer,
+    nargs='?' if CURRENT_REPO else None,
+    default=CURRENT_REPO
+)
 @arg('-s', '--state', choices=['OPEN', 'CLOSED', 'ALL'])
 def prs(repo, state='OPEN'):
     'list PRs for repo'
@@ -210,9 +313,48 @@ def prs(repo, state='OPEN'):
     )
 
 
+def pr(id):
+    r = get('get_pull_request', pullRequestId=id, q='pullRequest')
+    rc = get('get_comments_for_pull_request', pullRequestId=id)
+    comments = {}
+    for cd in rc:
+        if jq('location.relativeFileVersion', cd) == 'BEFORE':
+            continue
+        path = jq('location.filePath', cd)
+        loc = jq('location.filePosition', cd)
+        if path not in comments:
+            comments[path] = {}
+        comments[path][loc] = jq('comments[].content', cd)
+
+    repo = r['pullRequestTargets'][0]['repositoryName']
+    if repo != CURRENT_REPO:
+        Console().print('repo: [bold red]%s[/]' % repo)
+    ptable(
+        r,
+        ['title', 'pullRequestStatus', 'lastActivityDate']
+    )
+    rd = get(
+        'get_differences',
+        repositoryName=repo,
+        beforeCommitSpecifier=r['pullRequestTargets'][0]['sourceCommit'],
+        afterCommitSpecifier=r['pullRequestTargets'][0]['destinationCommit']
+    )
+    for d in rd:
+        (f1, f2) = [d[x]['path'] for x in ['afterBlob', 'beforeBlob']]
+        (c1, c2) = [
+            get(
+                'get_blob', blobId=d[x]['blobId'], repositoryName=repo,
+                nc=True,
+                q='content'
+            ).decode('utf-8')
+            for x in ['afterBlob', 'beforeBlob']
+        ]
+        print_diff(c1, c2, f2, comments)
+
+
 def cli():
     parser = argh.ArghParser()
-    parser.add_commands([repos, prs])
+    parser.add_commands([repos, prs, pr])
     argh.completion.autocomplete(parser)
     parser.dispatch()
 

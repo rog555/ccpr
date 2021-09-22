@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+from posixpath import join
 import argh
 from argh import arg
 import boto3
@@ -20,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import difflib
 import hashlib
+import inspect
 import jmespath
 import json
 import os
@@ -34,6 +36,7 @@ import time
 __version__ = '0.0.1'
 
 EX = ThreadPoolExecutor(max_workers=5)
+BINARY_EXTS = ['.zip', '.docx', '.pptx']
 
 
 def current_repo():
@@ -56,7 +59,7 @@ def ptable(data, headers, title=None, colorize=None, counter=None):
     if not isinstance(data, list):
         data = [data]
     console = Console()
-    table = Table(title=title)
+    table = Table(title=title, title_justify='left')
     if colorize is not None:
         for attr in colorize.keys():
             val = colorize[attr]
@@ -84,7 +87,7 @@ def ptable(data, headers, title=None, colorize=None, counter=None):
                 str(rc) if counter is True else '[%s]%s' % (counter, rc)
             )
         for attr, label in _headers.items():
-            val = rd.get(attr)
+            val = jq(attr, rd)
             if isinstance(val, datetime):
                 val = val.isoformat().split('.')[0]
             elif val is None:
@@ -124,6 +127,7 @@ def cccall(method, **kwargs):
     'call boto3 codecommit and cache responses'
     kwargs = dict(kwargs)
     nc = kwargs.pop('nc', None)  # no cache
+    join_key = kwargs.pop('_join_key', None)
     cache_secs = int(os.environ.get('CCC_CACHE_SECS', 10))
     cache_dir = os.path.join(
         tempfile.gettempdir(), 'codecommit-cli'
@@ -148,19 +152,22 @@ def cccall(method, **kwargs):
         # print('read %s' % cache_file)
     else:
         r = getattr(boto3.client('codecommit'), method)(**kwargs)
+        r.pop('ResponseMetadata', None)
         if nc is not True:
             json_txt = json.dumps(r, default=json_serial)
             # print(json_txt)
             open(cache_file, 'w').write(json_txt)
             # print('written %s' % cache_file)
+    if join_key is not None:
+        r['_join_key'] = join_key
     return r
 
 
 def get(method, **kwargs):
     kwargs = dict(kwargs)
-    q = kwargs.pop('q', None)
-    j = kwargs.pop('j', None)
-    f = kwargs.pop('f', None)
+    q = kwargs.pop('q', None)  # query
+    j = kwargs.pop('j', None)  # join(s)
+    f = kwargs.pop('f', None)  # filter
 
     # get boto3 method
     r = cccall(method, **kwargs)
@@ -189,24 +196,58 @@ def get(method, **kwargs):
                 _data.append(data[i])
         data = _data
 
-    # join dataset to other boto3 calls
+    listified = False
     if j is not None:
-        # codecommit boto3 method and attribute to query on
-        (join_method, join_attr) = j[0:2]
-        # get any other kwargs specified for the boto3 method
-        join_kwargs = j[2] if len(j) >= 3 else {}
+        if not isinstance(data, list):
+            data = [data]
+            listified = True
+
+    # join dataset to other boto3 calls
+    def _join_data(join_idx, _j):
+        # codecommit boto3 method and attributes to query on
+        (join_method, join_attrs) = _j[0:2]
+        join_kwargs = [] 
+        store_root = None
+        for i in range(len(data)):
+            jd = _j[2].copy() if len(_j) >= 3 else {}
+            # store_root used to store root of lookup_data rather than
+            # specific sub entity
+            store_root = jd.pop('store_root', join_idx > 0)
+            join_key = []
+            for join_query in join_attrs.split('|'):
+                join_attr = join_query.split('.')[-1]
+                jd[join_attr] = jq(join_query, data[i])
+                join_key.append(jd[join_attr])
+            jd['_join_key'] = '|'.join(join_key)
+            data[i]['_join_key'] = jd['_join_key']
+            join_kwargs.append(jd)
+
         # concurrently query boto3 join method
         join_data = list(EX.map(lambda _: cccall(
             join_method,
-            **dict(**join_kwargs, **{join_attr: _})
-        ), [d[join_attr] for d in data]))
+            **_
+        ), join_kwargs))
+
         # join datasets
         lookup_data = {}
         for d in join_data:
-            cd = list(d.values())[0]
-            lookup_data[cd[join_attr]] = cd
+            entity_keys = [k for k in d.keys() if not k.startswith('_')]
+            lookup_data[d['_join_key']] = (
+                d if store_root is True else d[entity_keys[0]]
+            )
         for i in range(len(data)):
-            data[i].update(lookup_data.get(data[i][join_attr], {}))
+            data[i].update(lookup_data.get(data[i]['_join_key'], {}))
+
+    # perform join(s)
+    if j is not None:
+        if not isinstance(j, list):
+            j = [j]
+        for i in range(len(j)):
+            _join_data(i, j[i])
+
+    if listified is True:
+        return data[0]
+
     return data
 
 
@@ -223,8 +264,6 @@ def print_diff(from_txt, to_txt, name=None, comments=None):
     diff = list(difflib._mdiff(
         from_lines_stripped, to_lines_stripped, context=3
     ))
-
-    print(json.dumps(comments, indent=2))
 
     def leading(line):
         _leading = ''
@@ -275,6 +314,17 @@ def print_diff(from_txt, to_txt, name=None, comments=None):
                 console.print('[cyan]%s[/]' % ''.join(comment))
 
 
+def add_approval_status(d):
+    satisfied = jq('length(evaluation.approvalRulesSatisfied)', d)
+    not_satisfied = jq('length(evaluation.approvalRulesNotSatisfied)', d)
+    d['approvalStatus'] = (
+        '[cyan]Approved[/]' if jq('evaluation.approved', d) else
+        '[red]%s of %s rules satisfied[/]' % (
+            satisfied, satisfied + not_satisfied
+        )
+    )
+
+
 def repos_completer(prefix, parsed_args, **kwargs):
     return [
         v for v in get('list_repositories', q='repositories[].repositoryName')
@@ -302,59 +352,111 @@ def prs(repo, state='OPEN'):
     'list PRs for repo'
     kwargs = dict(
         q='pullRequestIds[].{pullRequestId: @}',
-        j=('get_pull_request', 'pullRequestId', {}),
+        j=[
+            ('get_pull_request', 'pullRequestId'),
+            ('evaluate_pull_request_approval_rules',
+             'pullRequestId|revisionId')
+        ],
         repositoryName=repo
     )
     if state != 'ALL':
         kwargs['pullRequestStatus'] = state
+    data = get('list_pull_requests', **kwargs)
+    for i in range(len(data)):
+        add_approval_status(data[i])
     ptable(
-        get('list_pull_requests', **kwargs),
-        ['pullRequestId', 'title', 'pullRequestStatus']
+        data,
+        [
+            'id=pullRequestId', 'title',
+            'status=pullRequestStatus', 'approvalStatus'
+        ]
     )
 
 
-def pr(id):
-    r = get('get_pull_request', pullRequestId=id, q='pullRequest')
-    rc = get('get_comments_for_pull_request', pullRequestId=id)
-    comments = {}
-    for cd in rc:
-        if jq('location.relativeFileVersion', cd) == 'BEFORE':
-            continue
-        path = jq('location.filePath', cd)
-        loc = jq('location.filePosition', cd)
-        if path not in comments:
-            comments[path] = {}
-        comments[path][loc] = jq('comments[].content', cd)
-
-    repo = r['pullRequestTargets'][0]['repositoryName']
+def pr(id, diffs=False, path=None, comments=False):
+    r = get(
+        'get_pull_request', pullRequestId=id, q='pullRequest',
+        j=(
+            'evaluate_pull_request_approval_rules',
+            'pullRequestId|revisionId', {'store_root': True}
+        )
+    )
+    repo = jq('pullRequestTargets[0].repositoryName', r)
     if repo != CURRENT_REPO:
         Console().print('repo: [bold red]%s[/]' % repo)
-    ptable(
-        r,
-        ['title', 'pullRequestStatus', 'lastActivityDate']
-    )
+    add_approval_status(r)
+    ptable(r, [
+        'title', 'pullRequestStatus', 'lastActivityDate', 'approvalStatus'
+    ])
     rd = get(
         'get_differences',
         repositoryName=repo,
-        beforeCommitSpecifier=r['pullRequestTargets'][0]['sourceCommit'],
-        afterCommitSpecifier=r['pullRequestTargets'][0]['destinationCommit']
+        beforeCommitSpecifier=jq('pullRequestTargets[0].sourceCommit', r),
+        afterCommitSpecifier=jq('pullRequestTargets[0].destinationCommit', r)
     )
+    files = []
     for d in rd:
-        (f1, f2) = [d[x]['path'] for x in ['afterBlob', 'beforeBlob']]
-        (c1, c2) = [
-            get(
-                'get_blob', blobId=d[x]['blobId'], repositoryName=repo,
-                nc=True,
-                q='content'
-            ).decode('utf-8')
-            for x in ['afterBlob', 'beforeBlob']
-        ]
-        print_diff(c1, c2, f2, comments)
+        _path = jq('afterBlob.path || beforeBlob.path', d)
+        files.append({
+            'path': _path,
+            'after': jq('afterBlob.blobId', d),
+            'before': jq('beforeBlob.blobId', d)
+        })
+    if diffs is False:
+        ptable(files, ['path'], title='PR file(s):', counter=True)
+    else:
+        _comments = {}
+        if comments is True:
+            rc = get('get_comments_for_pull_request', pullRequestId=id)
+            for cd in rc:
+                if jq('location.relativeFileVersion', cd) == 'BEFORE':
+                    continue
+                _path = jq('location.filePath', cd)
+                loc = jq('location.filePosition', cd)
+                if _path not in comments:
+                    _comments[_path] = {}
+                _comments[_path][loc] = jq('comments[].content', cd)        
+        for fd in files:
+            _path = fd['path']
+            if os.path.splitext(_path)[-1] in BINARY_EXTS:
+                Console().print('[bold white]%s (binary)[/]' % fd['path'])
+                continue
+            if path is not None and not re.match('^.*%s.*$' % path, _path):
+                continue
+            if not all([fd['after'], fd['before']]):
+                Console().print('[bold white]%s (%s)[/]' % (
+                    fd['path'], 'deleted' if fd['after'] is None else 'added'
+                ))
+            (c1, c2) = [
+                get(
+                    'get_blob', blobId=bid, repositoryName=repo,
+                    nc=True,
+                    q='content'
+                ).decode('utf-8')
+                for bid in [fd['after'], fd['before']]
+            ]
+            print_diff(c1, c2, _path, _comments)
+    # argh prints function response, but we need to reuse it elsewhere
+    caller = inspect.stack()[1][3]
+    if caller == '_call':
+        return
+    return r
+
+
+def approve(id):
+    ad = get(
+        'update_pull_request_approval_state',
+        pullRequestId=id,
+        revisionId=jq('revisionId', pr(id)),
+        approvalState='APPROVE'
+    )
+    print(json.dumps(ad, indent=2, default=json_serial))
+    pr(id)
 
 
 def cli():
     parser = argh.ArghParser()
-    parser.add_commands([repos, prs, pr])
+    parser.add_commands([repos, prs, pr, approve])
     argh.completion.autocomplete(parser)
     parser.dispatch()
 

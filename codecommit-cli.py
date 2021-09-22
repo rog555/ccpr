@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-from posixpath import join
 import argh
 from argh import arg
 import boto3
@@ -30,13 +29,20 @@ from rich.console import Console
 from rich.rule import Rule
 from rich.style import Style
 from rich.table import Table
+import sys
 import tempfile
 import time
+import timeago
 
 __version__ = '0.0.1'
 
 EX = ThreadPoolExecutor(max_workers=5)
 BINARY_EXTS = ['.zip', '.docx', '.pptx']
+
+
+def fatal(msg):
+    Console().print('[red bold]ERROR: %s[/]' % msg)
+    sys.exit(1)
 
 
 def current_repo():
@@ -55,7 +61,9 @@ def current_repo():
 CURRENT_REPO = current_repo()
 
 
-def ptable(data, headers, title=None, colorize=None, counter=None):
+def ptable(
+    data, headers, title=None, colorize=None, counter=None, timeagos=[]
+):
     if not isinstance(data, list):
         data = [data]
     console = Console()
@@ -79,6 +87,7 @@ def ptable(data, headers, title=None, colorize=None, counter=None):
         _headers[attr] = label
         table.add_column(label)
     rc = 0
+    now = datetime.now()
     for rd in data:
         rc += 1
         row = []
@@ -93,6 +102,8 @@ def ptable(data, headers, title=None, colorize=None, counter=None):
             elif val is None:
                 val = ''
             val = str(val)
+            if label in timeagos and val is not None:
+                val = timeago.format(val.replace('T', ' '), now)
             if label in colorize:
                 (color, pattern) = colorize[label]
                 if pattern is None or re.match(pattern, val):
@@ -206,7 +217,7 @@ def get(method, **kwargs):
     def _join_data(join_idx, _j):
         # codecommit boto3 method and attributes to query on
         (join_method, join_attrs) = _j[0:2]
-        join_kwargs = [] 
+        join_kwargs = []
         store_root = None
         for i in range(len(data)):
             jd = _j[2].copy() if len(_j) >= 3 else {}
@@ -311,7 +322,9 @@ def print_diff(from_txt, to_txt, name=None, comments=None):
         if name in comments:
             comment = comments[name].get(to_lc)
             if comment is not None:
-                console.print('[cyan]%s[/]' % ''.join(comment))
+                ptable([{
+                    'comments': '[cyan]%s[/]' % ''.join(comment)
+                }], ['comments'])
 
 
 def add_approval_status(d):
@@ -367,9 +380,13 @@ def prs(repo, state='OPEN'):
     ptable(
         data,
         [
-            'id=pullRequestId', 'title',
-            'status=pullRequestStatus', 'approvalStatus'
-        ]
+            'id=pullRequestId',
+            'title',
+            'activity=lastActivityDate',
+            'status=pullRequestStatus',
+            'approvals=approvalStatus'
+        ],
+        timeagos=['activity']
     )
 
 
@@ -386,8 +403,11 @@ def pr(id, diffs=False, path=None, comments=False):
         Console().print('repo: [bold red]%s[/]' % repo)
     add_approval_status(r)
     ptable(r, [
-        'title', 'pullRequestStatus', 'lastActivityDate', 'approvalStatus'
-    ])
+        'title',
+        'activity=lastActivityDate',
+        'status=pullRequestStatus',
+        'approvals=approvalStatus'
+    ], timeagos=['activity'])
     rd = get(
         'get_differences',
         repositoryName=repo,
@@ -413,9 +433,9 @@ def pr(id, diffs=False, path=None, comments=False):
                     continue
                 _path = jq('location.filePath', cd)
                 loc = jq('location.filePosition', cd)
-                if _path not in comments:
+                if _path not in _comments:
                     _comments[_path] = {}
-                _comments[_path][loc] = jq('comments[].content', cd)        
+                _comments[_path][loc] = jq('comments[].content', cd)
         for fd in files:
             _path = fd['path']
             if os.path.splitext(_path)[-1] in BINARY_EXTS:
@@ -444,14 +464,16 @@ def pr(id, diffs=False, path=None, comments=False):
 
 
 def approve(id):
-    ad = get(
+    r = pr(id)
+    if r['pullRequestStatus'] == 'CLOSED':
+        fatal('PR already closed, unable to approve')
+    get(
         'update_pull_request_approval_state',
         pullRequestId=id,
-        revisionId=jq('revisionId', pr(id)),
+        revisionId=jq('revisionId', r),
         approvalState='APPROVE'
     )
-    print(json.dumps(ad, indent=2, default=json_serial))
-    pr(id)
+    Console().print('[bold green]approved[/]')
 
 
 def cli():

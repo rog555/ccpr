@@ -348,11 +348,13 @@ def print_diff(from_txt, to_txt, name=None, comments=None):
             '+': 'green',
             ' ': 'white'
         }
+
+        # some issues replacing formats when line ends with /
         for x in '^+-':
-            line = line.replace('\x00' + x, '[bold]')
-            line = line.replace('\x01', '[/]')
+            line = line.replace('\x00' + x, '')  # replace with [bold]
+            line = line.replace('\x01', '')  # replace with [/]
         console.print(
-            '[%s]%4s %4s: %s %s[/]' % (
+            '[%s]%4s %4s: %s %s' % (
                 colors[code], from_lc, to_lc, code, line
             ),
             highlight=False

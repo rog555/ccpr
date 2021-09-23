@@ -40,9 +40,9 @@ def get_requirements():
 
 
 setup(
-    name='codecommit-cli',
+    name='ccpr',
     version=get_version(),
-    description='AWS CodeCommit CLI',
+    description='AWS CodeCommit PR CLI',
     long_description=read('README.md'),
     long_description_content_type="text/markdown",
     author='Roger Foskett',
@@ -57,7 +57,7 @@ setup(
     install_requires=get_requirements(),
     entry_points={
         'console_scripts': [
-            'ccc = codecommit_cli:cli',
+            'ccpr = ccpr:cli',
         ]
     },
     url='https://github.com/rog555/codecommit-cli'

@@ -1,24 +1,45 @@
-# codecommit-cli
-AWS CodeCommit CLI
+# AWS CodeCommit PR CLI
+
+The **ccpr** script attempts to replicate the basic AWS CodeCommit Console from the CLI when dealing with pull requests
+
+This is achieved via context of current working git repo and branch, a bit of commandline completion and rich colours!
+
+**why?**
+
+Using CodeCommit console in one account at same time as accessing console in another account can be a pain (yes, maybe incognito could work..)  CLI access should allow for quicker workflow for creating/reviewing/approving and merging PRs
 
 ## Usage
 
 ```
-$ ccc -h
-usage: ccc [-h] {repos,prs} ...
+usage: ccpr [-h]
+            {approve,a,close,x,create,c,diff,d,merge,m,pr,id,prs,ls,repos,r}
+            ...
+
+AWS CodeCommit PR CLI
 
 positional arguments:
-  {repos,prs}
-    repos      list repos
-    prs        list PRs for repo
+  {approve,a,close,x,create,c,diff,d,merge,m,pr,id,prs,ls,repos,r}
+    approve (a)         approve PR
+    close (x)           close PR
+    create (c)          create PR
+    diff (d)            diff two local files
+    merge (m)           merge PR
+    pr (id)             show details for specific PR (colorized diffs with
+                        comments etc)
+    prs (ls)            list PRs for repo
+    repos (r)           list repos
 
 optional arguments:
-  -h, --help   show this help message and exit
+  -h, --help            show this help message and exit
 ```
 
-## Command Line Completion Installation
+## Installation
 
-codecommit-cli uses argcomplete for commandline completion, see https://kislyuk.github.io/argcomplete/#installation
+```
+$ pip install ccpr
+```
+
+**ccpr** uses argcomplete for commandline completion, see https://kislyuk.github.io/argcomplete/#installation
 
 ### Zsh
 
@@ -27,7 +48,7 @@ Add the following to your ~/.zshrc file and start new terminal window once saved
 ```
 autoload -U bashcompinit
 bashcompinit
-eval "$(register-python-argcomplete ccc)"
+eval "$(register-python-argcomplete ccpr)"
 ```
 
 ### Bash
@@ -35,9 +56,81 @@ eval "$(register-python-argcomplete ccc)"
 Add following to ~/.bash_profile and start new terminal window once saved
 
 ```
-eval "$(register-python-argcomplete ccc)"
+eval "$(register-python-argcomplete ccpr)"
 ```
 
+## Authentication ##
+
+See https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html
+
+Eg: 
+
+```
+export AWS_PROFILE=devops-account
+export AWS_REGION=us-east-1
+```
+
+## Examples
+
+### List repos
+
+```
+$ ccpr repos -f tool
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ name                                 ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ developer-tools                      │
+│ monitoring-tools                     │
+│ some-other-tool                      │
+└──────────────────────────────────────┘
+```
+
+### Create PR
+
+Change to CodeCommit repo directory and create PR on the 'foobar' branch.  The latest commit message is used as default PR title
+
+```
+$ cd developer-tools/
+$ git branch
+  master
+* foobar
+
+$ ccpr create
+Enter PR title (foobar baz biz fiz):
+created PR 351
+```
+
+### List PRs in current repo
+
+```
+$ ccpr prs
+┏━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ id  ┃ title              ┃ author        ┃ activity    ┃ status ┃ approvals              ┃
+┡━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 351 │ foobar baz biz fiz │ foo@foo.com   │ 3 hours ago │ CLOSED │ 1 of 2 rules satisfied │
+└─────┴────────────────────┴───────────────┴─────────────┴────────┴────────────────────────┘
+```
+
+### List details of PR
+
+Show colorized diff
+
+```
+$ ccpr pr 351 -d
+┏━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ id  ┃ title              ┃ author        ┃ activity    ┃ status ┃ approvals              ┃
+┡━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 351 │ foobar baz biz fiz │ foo@foo.com   │ 3 hours ago │ CLOSED │ 1 of 2 rules satisfied │
+└─────┴────────────────────┴───────────────┴─────────────┴────────┴────────────────────────┘
+some-file1.txt
+────────────────────────────────────────────────────────────────────────────────────────────
+   1    1:   abc
+   2     : - def
+        2: + defghi
+   3     : - hij
+        3: + xyz
+        4: +
+```
 
 ## License
 The license is Apache 2.0, see [LICENSE](./LICENSE) for the details.

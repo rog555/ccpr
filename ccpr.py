@@ -318,13 +318,19 @@ def cc(method, **kwargs):
     return data
 
 
-def print_diff(from_txt, to_txt, name=None, comments=None):
+def print_diff(
+    from_txt, to_txt, name=None, comments=None, print_name=True,
+    print_modified=False
+):
     'print color diff of two strings'
     if comments is None:
         comments = {}
     console = Console(highlight=False)
-    if name is not None:
-        console.print('[bold white]%s[/]' % name)
+    if name is not None and print_name is True:
+        meta_msg = '[green]+modified+[/] ' if print_modified else ''
+        if name in comments:
+            meta_msg += '[cyan] %s comment(s)[/]' % len(comments[name])
+        console.print('[bold white]%s %s[/]' % (name, meta_msg))
     from_lines = from_txt.splitlines()
     from_lines_stripped = [line.lstrip().rstrip() for line in from_lines]
     to_lines = to_txt.splitlines()
@@ -521,20 +527,39 @@ def pr(id, diffs=False, comments=False, path=None):
         _comments = {}
         if comments is True:
             rc = cc('get_comments_for_pull_request', pullRequestId=id)
+            pr_comments = []
             if not isinstance(rc, list):
                 rc = []
             for cd in rc:
-                if jq('location.relativeFileVersion', cd) == 'BEFORE':
-                    continue
-                _path = jq('location.filePath', cd)
-                loc = jq('location.filePosition', cd)
-                if _path not in _comments:
-                    _comments[_path] = {}
-                _comments[_path][loc] = [{
+                _comments_data = [{
                     'author': _cd['authorArn'].split('/')[-1],
                     'comment': _cd['content']
                 } for _cd in cd['comments']]
+                if 'location' not in cd:
+                    pr_comments += _comments_data
+                elif jq('location.relativeFileVersion', cd) == 'AFTER':
+                    _path = jq('location.filePath', cd)
+                    loc = jq('location.filePosition', cd)
+                    if _path not in _comments:
+                        _comments[_path] = {}
+                    if loc not in _comments[_path]:
+                        _comments[_path][loc] = []
+                    _comments[_path][loc] += _comments_data
+            if len(pr_comments) > 0:
+                ptable(pr_comments, ['author', 'comment'], colorize={
+                    'author': '.*=cyan', 'comment': '.*=cyan'
+                }, title='PR comments')
         path_matches = 0
+
+        def _get_content(bid):
+            if bid is None:
+                return ''
+            return cc(
+                'get_blob', blobId=bid, repositoryName=repo,
+                nc=True,
+                q='content'
+            ).decode('utf-8')
+
         for fd in files:
             _path = fd['file']
             if os.path.splitext(_path)[-1] in BINARY_EXTS:
@@ -543,21 +568,24 @@ def pr(id, diffs=False, comments=False, path=None):
             if path is not None and not re.match('^.*%s.*$' % path, _path):
                 continue
             path_matches += 1
-            if not all([fd['after'], fd['before']]):
-                Console().print('[bold white]%s %s[/]' % (
+            (before, after) = (fd.get('before'), fd.get('after'))
+            if not all([before, after]):
+                comments_msg = (
+                    ' [cyan]%s comment(s)[/]' % len(_comments[_path])
+                    if _path in _comments else ''
+                )
+                Console().print('[bold white]%s %s%s[/]' % (
                     _path, '[red]-deleted-[/]'
-                    if fd['after'] is None else '[green]+added+[/]'
+                    if after is None else '[green]+added+[/]',
+                    comments_msg
                 ))
-                continue
-            (c1, c2) = [
-                cc(
-                    'get_blob', blobId=bid, repositoryName=repo,
-                    nc=True,
-                    q='content'
-                ).decode('utf-8')
-                for bid in [fd['before'], fd['after']]
-            ]
-            print_diff(c1, c2, _path, _comments)
+            if all([before, after]) or all([path, after]):
+                print_diff(
+                    _get_content(before), _get_content(after), _path,
+                    _comments,
+                    print_name=all([before, after]),
+                    print_modified=all([before, after])
+                )
         if path is not None and path_matches == 0:
             fatal('no paths matching pattern %s in PR' % path)
     # argh prints function response, but we need to reuse it elsewhere

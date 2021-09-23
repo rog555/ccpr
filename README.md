@@ -35,11 +35,17 @@ optional arguments:
 
 ## Installation
 
+Until ccpr is available on pip, clone this repo and then symlink ccpr.py to somewhere on your PATH
+
+Eg:
+
 ```
-$ pip install ccpr
+$ git clone https://github.com/rog555/codecommit-pr-cli.git
+$ ln -s codecommit-pr-cli/ccpr.py /usr/local/bin/ccpr
+$ pip install -r codecommit-pr-cli/requirements.txt
 ```
 
-**ccpr** uses argcomplete for commandline completion, see https://kislyuk.github.io/argcomplete/#installation
+ccpr uses argcomplete for commandline completion, see https://kislyuk.github.io/argcomplete/#installation
 
 ### Zsh
 

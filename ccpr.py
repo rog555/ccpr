@@ -528,7 +528,6 @@ def pr(id, diffs=False, comments=False, path=None):
                 loc = jq('location.filePosition', cd)
                 if _path not in _comments:
                     _comments[_path] = {}
-                print(cd)
                 _comments[_path][loc] = [{
                     'author': _cd['authorArn'].split('/')[-1],
                     'comment': _cd['content']

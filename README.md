@@ -12,16 +12,18 @@ Using CodeCommit console in one account at same time as accessing console in ano
 
 ```
 usage: ccpr [-h]
-            {approve,a,close,x,create,c,diff,d,merge,m,pr,id,prs,ls,repos,r}
+            {approve,a,create,c,close,x,comment,C,diff,d,merge,m,pr,id,prs,ls,repos,r}
             ...
 
 AWS CodeCommit PR CLI
 
 positional arguments:
-  {approve,a,close,x,create,c,diff,d,merge,m,pr,id,prs,ls,repos,r}
+  {approve,a,create,c,close,x,comment,C,diff,d,merge,m,pr,id,prs,ls,repos,r}
     approve (a)         approve PR
-    close (x)           close PR
     create (c)          create PR
+    close (x)           close PR
+    comment (C)         comment on PR, general if file and lineno not
+                        specified
     diff (d)            diff two local files
     merge (m)           merge PR
     pr (id)             show details for specific PR (colorized diffs with

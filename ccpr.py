@@ -42,9 +42,26 @@ __version__ = '0.0.1'
 EX = ThreadPoolExecutor(max_workers=5)
 BINARY_EXTS = ['.zip', '.docx', '.pptx']
 
+global CONSOLE
+CONSOLE = None
+
+
+def set_console(console):
+    global CONSOLE
+    CONSOLE = console
+
+
+def get_console(highlight=True):
+    global CONSOLE
+    if CONSOLE is None:
+        set_console(Console(highlight=highlight))
+    return CONSOLE
+
 
 def fatal(msg):
-    Console().print('[red bold]ERROR: %s[/]' % msg)
+    if os.environ.get('CCPR_TEST_FATAL_RAISE', 'FALSE') == 'TRUE':
+        raise Exception(msg)
+    get_console().print('[red bold]ERROR: %s[/]' % msg)
     sys.exit(1)
 
 
@@ -64,7 +81,7 @@ def git_repo(path=None):
 
 def current_repo():
     'get current git repo'
-    repo = os.environ.get('CCC_REPO')
+    repo = os.environ.get('CCPR_REPO')
     if repo is not None:
         return repo
     return git_repo()[0]
@@ -115,7 +132,6 @@ def ptable(
     'print table using rich'
     if not isinstance(data, list):
         data = [data]
-    console = Console()
     table = Table(title=title, title_justify='left')
     if colorize is not None:
         for attr in colorize.keys():
@@ -163,7 +179,7 @@ def ptable(
                         break
             row.append(val)
         table.add_row(*row)
-    console.print(table)
+    get_console().print(table)
 
 
 def json_serial(obj):
@@ -187,9 +203,10 @@ def jq(query, data):
 def ccapi(method, **kwargs):
     'call boto3 codecommit and cache responses'
     kwargs = dict(kwargs)
-    nc = kwargs.pop('nc', None)  # no cache
+    cache_secs = kwargs.pop(
+        'cache_secs', int(os.environ.get('CCPR_CACHE_SECS', 20))
+    )
     join_key = kwargs.pop('_join_key', None)
-    cache_secs = int(os.environ.get('CCC_CACHE_SECS', 10))
     cache_dir = os.path.join(
         tempfile.gettempdir(), 'codecommit-cli'
     )
@@ -208,9 +225,9 @@ def ccapi(method, **kwargs):
         hashlib.sha256(json.dumps(dict(kwargs)).encode('UTF-8')).hexdigest()
     ))
     r = None
-    if nc is not True and os.path.isfile(cache_file):
+    if cache_secs > 0 and os.path.isfile(cache_file):
         r = json.loads(open(cache_file, 'r').read())
-        # print('read %s' % cache_file)
+        print('read %s' % cache_file)
     else:
         r = None
         try:
@@ -218,7 +235,7 @@ def ccapi(method, **kwargs):
         except ClientError as e:
             fatal('unable to %s: %s' % (method, e))
         r.pop('ResponseMetadata', None)
-        if nc is not True:
+        if cache_secs > 0:
             json_txt = json.dumps(r, default=json_serial)
             # print(json_txt)
             open(cache_file, 'w').write(json_txt)
@@ -277,6 +294,8 @@ def cc(method, **kwargs):
         store_root = None
         for i in range(len(data)):
             jd = _j[2].copy() if len(_j) >= 3 else {}
+            if 'cache_secs' in kwargs:
+                jd['cache_secs'] = kwargs['cache_secs']
             # store_root used to store root of lookup_data rather than
             # specific sub entity
             store_root = jd.pop('store_root', join_idx > 0)
@@ -323,9 +342,9 @@ def print_diff(
     print_modified=False
 ):
     'print color diff of two strings'
+    console = get_console()
     if comments is None:
         comments = {}
-    console = Console(highlight=False)
     if name is not None and print_name is True:
         meta_msg = '[green]+modified+[/] ' if print_modified else ''
         if name in comments:
@@ -413,6 +432,32 @@ def repos_completer(prefix, parsed_args, **kwargs):
     ]
 
 
+def pr_files_completer(prefix, parsed_args, **kwargs):
+    'command line completer for PR files'
+    r = cc(
+        'get_pull_request', pullRequestId=(
+            parsed_args if isinstance(parsed_args, str)
+            else parsed_args.id
+        ), q='pullRequest'
+    )
+    (repo, before, after) = jq(
+        'pullRequestTargets[0].'
+        + '[repositoryName, destinationCommit, sourceCommit]',
+        r
+    )
+    files = jq('[*].afterBlob.path', cc(
+        'get_differences',
+        repositoryName=repo,
+        beforeCommitSpecifier=before,
+        afterCommitSpecifier=after,
+    ))
+    if isinstance(parsed_args, str):
+        return (repo, files, before, after)
+    return [
+        f for f in files if f.startswith(prefix)
+    ]
+
+
 @arg('-f', '--filter', help='filter repos on pattern')
 @aliases('r')
 def repos(filter=None):
@@ -472,13 +517,13 @@ def prs(repo, any=False, closed=False, open=False):
 
 @arg('-d', '--diffs', help='show differences')
 @arg('-c', '--comments', help='show diff comments')
-@arg('-p', '--path', help='filter diffs on matching path')
+@arg('-f', '--file', help='filter diff files on matching file pattern')
 @aliases('id')
-def pr(id, diffs=False, comments=False, path=None):
+def pr(id, diffs=False, comments=False, file=None):
     'show details for specific PR (colorized diffs with comments etc)'
-    if any([comments, path]):
+    console = get_console()
+    if any([comments, file]):
         diffs = True
-    'PR details'
     r = cc(
         'get_pull_request', pullRequestId=id, q='pullRequest',
         j=(
@@ -488,7 +533,7 @@ def pr(id, diffs=False, comments=False, path=None):
     )
     repo = jq('pullRequestTargets[0].repositoryName', r)
     if repo != CURRENT_REPO:
-        Console().print('repo: [bold red]%s[/]' % repo)
+        console.print('repo: [bold red]%s[/]' % repo)
     enrich_pr(r)
     ptable(r, [
         'id=pullRequestId',
@@ -556,16 +601,16 @@ def pr(id, diffs=False, comments=False, path=None):
                 return ''
             return cc(
                 'get_blob', blobId=bid, repositoryName=repo,
-                nc=True,
-                q='content'
+                q='content',
+                cache_secs=0
             ).decode('utf-8')
 
         for fd in files:
             _path = fd['file']
             if os.path.splitext(_path)[-1] in BINARY_EXTS:
-                Console().print('[bold white]%s (binary)[/]' % _path)
+                console.print('[bold white]%s (binary)[/]' % _path)
                 continue
-            if path is not None and not re.match('^.*%s.*$' % path, _path):
+            if file is not None and not re.match('^.*%s.*$' % file, _path):
                 continue
             path_matches += 1
             (before, after) = (fd.get('before'), fd.get('after'))
@@ -574,20 +619,20 @@ def pr(id, diffs=False, comments=False, path=None):
                     ' [cyan]%s comment(s)[/]' % len(_comments[_path])
                     if _path in _comments else ''
                 )
-                Console().print('[bold white]%s %s%s[/]' % (
+                console.print('[bold white]%s %s%s[/]' % (
                     _path, '[red]-deleted-[/]'
                     if after is None else '[green]+added+[/]',
                     comments_msg
                 ))
-            if all([before, after]) or all([path, after]):
+            if all([before, after]) or all([file, after]):
                 print_diff(
                     _get_content(before), _get_content(after), _path,
                     _comments,
                     print_name=all([before, after]),
                     print_modified=all([before, after])
                 )
-        if path is not None and path_matches == 0:
-            fatal('no paths matching pattern %s in PR' % path)
+        if file is not None and path_matches == 0:
+            fatal("no files matching pattern '%s' in PR" % file)
     # argh prints function response, but we need to reuse it elsewhere
     caller = inspect.stack()[1][3]
     if caller == '_call':
@@ -608,7 +653,7 @@ def approve(id):
         revisionId=jq('revisionId', r),
         approvalState='APPROVE'
     )
-    Console().print('[bold green]PR approved[/]')
+    get_console().print('[bold green]PR approved[/]')
 
 
 @arg('id', help='PR ID')
@@ -623,9 +668,10 @@ def close(id):
     cc(
         'update_pull_request_status',
         pullRequestId=id,
-        pullRequestStatus='CLOSED'
+        pullRequestStatus='CLOSED',
+        cache_secs=0
     )
-    Console().print('[cyan]PR closed[/]')
+    get_console().print('[cyan]PR closed[/]')
 
 
 @arg('id', help='PR ID')
@@ -644,9 +690,10 @@ def merge(id, strategy='squash'):
     cc(
         'merge_pull_request_by_%s' % strategy,
         pullRequestId=id,
-        repositoryName=jq('pullRequestTargets[0].repositoryName', r)
+        repositoryName=jq('pullRequestTargets[0].repositoryName', r),
+        cache_secs=0
     )
-    Console().print('[cyan]PR merged[/]')
+    get_console().print('[cyan]PR merged[/]')
 
 
 @arg(
@@ -675,11 +722,48 @@ def create(repo, title=None):
         targets=[{
             'repositoryName': repo,
             'sourceReference': branch
-        }]
+        }],
+        cache_secs=0
     )
-    Console().print('created PR [bold]%s[/]' % jq(
+    get_console().print('[cyan]created PR [bold]%s[/]' % jq(
         'pullRequest.pullRequestId', r
     ))
+
+
+@arg('id', help='PR ID')
+@arg('content', help='comment content')
+@arg('-f', '--file', help='file comment', completer=pr_files_completer)
+@arg('-l', '--lineno', help='line number of file', type=int)
+@aliases('C')
+def comment(id, content, file=None, lineno=None):
+    'comment on PR, general if file and lineno not specified'
+    if any([file, lineno]) and not all([file, lineno]):
+        fatal('--lineno required with --file')
+    (repo, files, before, after) = pr_files_completer('', id)
+    if file is not None and file not in files:
+        fatal("file '%s' not in list of PR files:\n%s" % (
+            file, '\n'.join([
+                '[white]%s] %s[/]' % (i + 1, files[i])
+                for i in range(len(files))
+            ])
+        ))
+    msg = 'general comment added'
+    kwargs = {
+        'pullRequestId': id,
+        'repositoryName': repo,
+        'beforeCommitId': before,
+        'afterCommitId': after,
+        'content': content
+    }
+    if file is not None:
+        msg = 'file comment added'
+        kwargs['location'] = {
+            'filePath': file,
+            'filePosition': lineno,
+            'relativeFileVersion': 'AFTER'
+        }
+    cc('post_comment_for_pull_request', **kwargs, cache_secs=0)
+    get_console().print('[cyan]%s[/]' % msg)
 
 
 @aliases('d')
@@ -695,7 +779,7 @@ def cli():
     parser = argh.ArghParser()
     parser.description = 'AWS CodeCommit PR CLI'
     parser.add_commands([
-        approve, close, create, diff, merge, pr, prs, repos
+        approve, create, close, comment, diff, merge, pr, prs, repos
     ])
     argh.completion.autocomplete(parser)
     parser.dispatch()

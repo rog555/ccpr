@@ -26,7 +26,7 @@ sys.path.append(ROOT_DIR)
 import ccpr  # noqa: E402
 from tests.mock_boto3 import mock_boto3  # noqa: E402
 os.environ['CCPR_FATAL_RAISE'] = 'TRUE'
-os.environ['AWS_REGION'] = 'us-east-1'
+os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
 
 
 def _table(columns, rows, title=None):

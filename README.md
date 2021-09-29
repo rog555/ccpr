@@ -8,6 +8,9 @@ This is achieved via context of current working git repo and branch, a bit of co
 
 Using CodeCommit console in one account at same time as accessing console in another account can be a pain (yes, maybe incognito could work..)  CLI access should allow for quicker workflow for creating/reviewing/approving and merging PRs
 
+[![Tests](https://github.com/rog555/codecommit-pr-cli/actions/workflows/tests.yml/badge.svg)](https://github.com/rog555/codecommit-pr-cli/actions/workflows/tests.yml/)
+[![Codecov](https://codecov.io/gh/rog555/codecommit-pr-cli/branch/master/graph/badge.svg)](https://codecov.io/gh/rog555/codecommit-pr-cli/branch/master)
+
 ## Usage
 
 ```

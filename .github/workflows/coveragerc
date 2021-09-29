@@ -1,0 +1,13 @@
+[run]
+branch = True
+include =
+    ccpr.py
+
+[report]
+exclude_lines =
+    raise NotImplementedError.*
+omit =
+    tests/*
+
+[html]
+directory = coverage_html_report

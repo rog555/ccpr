@@ -18,7 +18,7 @@ import os
 import sys
 
 import botocore
-from mock import patch
+from unittest.mock import patch
 
 
 ORIG_MAKE_API_CALL = botocore.client.BaseClient._make_api_call

@@ -12,12 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+from datetime import datetime
 from io import StringIO
+import json
 import os
 import pytest
 from rich.console import Console
 from rich.table import Table
 import sys
+from unittest.mock import patch
 
 ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 DATA_DIR = os.path.join(ROOT_DIR, 'tests', 'data')
@@ -81,6 +84,86 @@ def get_pr_output(prid, state='OPEN', approvals='Approved', diff=False):
     return output
 
 
+def test_fatal():
+    os.environ['CCPR_FATAL_RAISE'] = 'FALSE'
+    # ccpr.set_console(None)
+    with pytest.raises(SystemExit):
+        ccpr.fatal('foo')
+    os.environ['CCPR_FATAL_RAISE'] = 'TRUE'
+
+
+def test_git_files(tmp_path):
+    rd = tmp_path / 'somerepo'
+    rd.mkdir()
+    with patch('os.getcwd') as m:
+        m.return_value = str(rd)
+        with pytest.raises(Exception) as e:
+            ccpr.current_branch()
+        assert str(e.value) == 'must be in a repo directory'
+    gd = rd / '.git'
+    gd.mkdir()
+    fd = gd / 'foo'
+    fd.mkdir()
+    hf = gd / 'HEAD'
+    hf.write_text('stuff')
+    with patch('os.getcwd') as m:
+        m.return_value = str(rd)
+        with pytest.raises(Exception) as e:
+            ccpr.current_branch()
+        assert str(e.value) == 'no branch found in repo somerepo'
+    hf = gd / 'HEAD'
+    hf.write_text('ref: refs/heads/somebranch')
+    with patch('os.getcwd') as m:
+        m.return_value = str(fd)
+        assert ccpr.current_repo() == 'somerepo'
+        assert ccpr.current_branch() == 'somebranch'
+    hf.unlink()
+    hf.write_text('ref: refs/heads/master')
+    with patch('os.getcwd') as m:
+        m.return_value = str(fd)
+        with pytest.raises(Exception) as e:
+            ccpr.current_branch()
+        assert str(e.value) == 'branch must not be main or master'
+    hf.unlink()
+    hf.write_text('ref: refs/heads/somebranch')
+    ld = gd / 'logs' / 'refs' / 'heads'
+    ld.mkdir(parents=True)
+    lf = ld / 'somebranch'
+    with patch('os.getcwd') as m:
+        m.return_value = str(fd)
+        assert ccpr.last_commit_message() is None
+        lf.write_text(
+            'stuff\n0 1 2 3 commit: 5 foo: bar\n0 1 2 3 4 5 commit: somecommit'
+        )
+        assert ccpr.last_commit_message() == 'somecommit'
+
+
+def test_json_serial():
+    dt = datetime.now()
+    ts = dt.isoformat().split('.')[0]
+    assert json.dumps({
+        'a': dt,
+        'b': 1,
+        'c': set([1, 2])
+    }, default=ccpr.json_serial) == (
+        '{"a": "%s", "b": 1, "c": [1, 2]}' % ts
+    )
+
+
+def test_ptable():
+    ccpr.set_console(Console(file=StringIO()))
+    ccpr.ptable({'a': 'a1'}, ['a', 'b'], colorize={
+        'b': 'red'
+    })
+    output = get_output()
+    print(output)
+    assert output == _table(
+        ['a', 'b'], [
+            ['a1', '']
+        ]
+    )
+
+
 @mock_boto3
 def test_repos():
     ccpr.set_console(Console(file=StringIO()))
@@ -101,6 +184,15 @@ def test_prs():
              '1 of 2 rules satisfied']
         ]
     )
+    with pytest.raises(Exception) as e:
+        ccpr.prs('repo1', closed=True)
+    assert str(e.value) == 'no PRs with CLOSED state in repo repo1'
+    with pytest.raises(Exception) as e:
+        ccpr.prs('repo3')
+    assert str(e.value).startswith(
+        'unable to list_pull_requests: '
+        + 'An error occurred (RepositoryDoesNotExistException)'
+    )
 
 
 @mock_boto3
@@ -109,6 +201,9 @@ def test_pr_simple():
     ccpr.set_console(Console(file=StringIO()))
     ccpr.pr('1')
     assert get_output() == get_pr_output('1')
+    with pytest.raises(Exception) as e:
+        ccpr.pr('1', file='baz')
+    assert str(e.value) == "no files matching pattern 'baz' in PR"
 
 
 @mock_boto3
@@ -161,6 +256,9 @@ def test_create():
     ccpr.set_console(Console(file=StringIO()))
     ccpr.create('repo1', title='foobar', branch='foo')
     assert get_output() == 'created PR 3\n'
+    with pytest.raises(Exception) as e:
+        ccpr.create('repo1', title='foobar', branch='baz')
+    assert str(e.value) == 'current branch baz not in repo repo1'
 
 
 @mock_boto3

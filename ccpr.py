@@ -16,7 +16,6 @@ import argh
 from argh import aliases
 from argh import arg
 import boto3
-from boto3.dynamodb.types import Decimal
 from botocore.exceptions import ClientError
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -81,10 +80,7 @@ def git_repo(path=None):
 
 def current_repo():
     'get current git repo'
-    repo = os.environ.get('CCPR_REPO')
-    if repo is not None:
-        return repo
-    return git_repo()[0]
+    return os.environ.get('CCPR_REPO', git_repo()[0])
 
 
 def current_branch():
@@ -111,7 +107,7 @@ def last_commit_message():
     message = None
     branch = current_branch()
     log_file = os.path.join(git_path, 'logs', 'refs', 'heads', branch)
-    if log_file is None:
+    if not os.path.isfile(log_file):
         return None
     with open(log_file, 'r') as fh:
         for line in fh.read().splitlines():
@@ -185,11 +181,6 @@ def ptable(
 def json_serial(obj):
     if isinstance(obj, datetime):
         return obj.isoformat().split('.')[0]
-    if isinstance(obj, Decimal):
-        if obj % 1 > 0:
-            return float(obj)
-        else:
-            return int(obj)
     if isinstance(obj, set):
         return list(obj)
     raise TypeError('type not serializable')

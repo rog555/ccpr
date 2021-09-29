@@ -18,6 +18,7 @@ import os
 import sys
 
 import botocore
+from botocore.exceptions import ClientError
 from unittest.mock import patch
 
 
@@ -97,8 +98,16 @@ def mock_codecommit(operation_name, kwargs):
         }
 
     elif operation_name == 'ListPullRequests':
+        if kwargs.get('repositoryName') == 'repo3':
+            raise ClientError({
+                'Error': {
+                    'Code': 'RepositoryDoesNotExistException',
+                    'Message': 'repo3 does not exist'
+                }
+            }, operation_name)
         response = {
-            "pullRequestIds": ['1', '2']
+            "pullRequestIds": []
+            if kwargs.get('pullRequestStatus') == 'CLOSED' else ['1', '2']
         }
 
     elif operation_name == 'GetPullRequest':

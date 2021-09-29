@@ -29,7 +29,7 @@ jobs:
           flake8 . --count --exit-zero --max-line-length=127 --statistics
       - name: Test with pytest
         run: |
-          pytest --cov-fail-under 75 --cov-report=xml --cov-report=html --cov-config=.github/workflows/coveragerc
+          pytest --cov-fail-under 75 --cov-report=xml --cov-config=.github/workflows/coveragerc
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v2
         with:

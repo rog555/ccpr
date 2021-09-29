@@ -59,7 +59,7 @@ def get_console(highlight=True):
 
 
 def fatal(msg):
-    if os.environ.get('CCPR_TEST_FATAL_RAISE', 'FALSE') == 'TRUE':
+    if os.environ.get('CCPR_FATAL_RAISE', 'FALSE') == 'TRUE':
         raise Exception(msg)
     get_console().print('[red bold]ERROR: %s[/]' % msg)
     sys.exit(1)
@@ -203,9 +203,10 @@ def jq(query, data):
 def ccapi(method, **kwargs):
     'call boto3 codecommit and cache responses'
     kwargs = dict(kwargs)
-    cache_secs = kwargs.pop(
-        'cache_secs', int(os.environ.get('CCPR_CACHE_SECS', 20))
-    )
+    cache_secs = kwargs.pop('cache_secs', 20)
+    if 'cache_secs' in os.environ:
+        cache_secs = int(os.environ['CCPR_CACHE_SECS'])
+
     join_key = kwargs.pop('_join_key', None)
     cache_dir = os.path.join(
         tempfile.gettempdir(), 'codecommit-cli'
@@ -480,10 +481,9 @@ def repos(filter=None):
 )
 @arg('-a', '--any', help='show PRs with any state')
 @arg('-c', '--closed', help='show PRs with CLOSED state')
-@arg('-o', '--open', help='show PRs with OPEN state')
 @aliases('ls')
-def prs(repo, any=False, closed=False, open=False):
-    'list PRs for repo'
+def prs(repo, any=False, closed=False):
+    'list PRs for repo - OPEN by default'
     state = 'CLOSED' if closed else 'any' if any else 'OPEN'
     kwargs = dict(
         q='pullRequestIds[].{pullRequestId: @}',
@@ -658,12 +658,14 @@ def approve(id):
 
 @arg('id', help='PR ID')
 @aliases('x')
-def close(id):
+def close(id, confirm=False):
     'close PR'
     r = pr(id)
     if r['pullRequestStatus'] == 'CLOSED':
         fatal('PR already closed')
-    if Prompt.ask('Confirm?', choices=['yes', 'no'], default='no') != 'yes':
+    if (confirm is False
+       and Prompt.ask('Confirm?', choices=['yes', 'no'], default='no')
+       != 'yes'):
         return
     cc(
         'update_pull_request_status',
@@ -708,14 +710,15 @@ def merge(id, strategy='squash'):
     help='title of PR, defaults to last commit message on branch'
 )
 @aliases('c')
-def create(repo, title=None):
+def create(repo, title=None, branch=None):
     'create PR'
-    branch = current_branch()
+    branch = branch or current_branch()
     branches = cc('list_branches', repositoryName=repo)
     if branch not in branches:
         fatal('current branch %s not in repo %s' % (branch, repo))
-    if title is None:
-        title = Prompt.ask('Enter PR title', default=last_commit_message())
+    title = title or Prompt.ask(
+        'Enter PR title', default=last_commit_message()
+    )
     r = cc(
         'create_pull_request',
         title=title,

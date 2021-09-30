@@ -219,7 +219,6 @@ def ccapi(method, **kwargs):
     r = None
     if cache_secs > 0 and os.path.isfile(cache_file):
         r = json.loads(open(cache_file, 'r').read())
-        print('read %s' % cache_file)
     else:
         r = None
         try:

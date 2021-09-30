@@ -144,17 +144,33 @@ def mock_codecommit(operation_name, kwargs):
 
     elif operation_name == 'GetDifferences':
         response = {
-            'differences': [{
-                'beforeBlob': {
-                    'blobId': 'b1a',
-                    'path': 'foo/bar.txt'
+            'differences': [
+                {
+                    'beforeBlob': {
+                        'blobId': 'b1a',
+                        'path': 'foo/bar.txt'
+                    },
+                    'afterBlob': {
+                        'blobId': 'b1b',
+                        'path': 'foo/bar.txt'
+                    },
+                    'changeType': 'M'
                 },
-                'afterBlob': {
-                    'blobId': 'b1b',
-                    'path': 'foo/bar.txt'
+                {
+                    'beforeBlob': {
+                        'blobId': 'b2a',
+                        'path': 'foo/bar.zip'
+                    },
+                    'changeType': 'D'
                 },
-                'changeType': 'M'
-            }]
+                {
+                    'afterBlob': {
+                        'blobId': 'b2a',
+                        'path': 'foo/foo.txt'
+                    },
+                    'changeType': 'A'
+                }
+            ]
         }
 
     elif operation_name == 'GetBlob':
@@ -162,7 +178,8 @@ def mock_codecommit(operation_name, kwargs):
         response = {
             'content': {
                 'b1a': 'line1\nline2\nline3',
-                'b1b': 'line1\nliNe2\nline4\nline5'
+                'b1b': 'line1\nliNe2\nline4\nline5',
+                'b2a': 'line1\nline2'
             }[bid].encode('utf-8')
         }
 

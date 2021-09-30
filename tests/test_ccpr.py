@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+from collections import namedtuple
 from datetime import datetime
 from io import StringIO
 import json
@@ -66,7 +67,11 @@ def get_pr_output(prid, state='OPEN', approvals='Approved', diff=False):
     if diff is False:
         output += 'changes:\n' + _table(
             ['#', 'file', 'change'],
-            [['1', 'foo/bar.txt', 'modified']]
+            [
+                ['1', 'foo/bar.txt', 'modified'],
+                ['2', 'foo/bar.zip', 'deleted'],
+                ['3', 'foo/foo.txt', 'added']
+            ]
         )
     else:
         output += (
@@ -80,6 +85,10 @@ def get_pr_output(prid, state='OPEN', approvals='Approved', diff=False):
    3     : - line3
         3: + line4
         4: + line5
+foo/bar.zip (binary)
+foo/foo.txt +added+
+        1: + line1
+        2: + line2
 ''')
     return output
 
@@ -162,6 +171,16 @@ def test_ptable():
             ['a1', '']
         ]
     )
+
+
+@mock_boto3
+def test_completers():
+    assert ccpr.repos_completer('repo', None) == ['repo0', 'repo1', 'repo2']
+    parsed_args = namedtuple('foo', 'id')
+    parsed_args.id = '1'
+    assert ccpr.pr_files_completer('', parsed_args) == [
+        'foo/bar.txt', 'foo/foo.txt'
+    ]
 
 
 @mock_boto3
@@ -272,9 +291,10 @@ def test_comment():
         ccpr.comment('1', content='foo', file='foo.txt')
     assert str(e.value) == '--lineno required with --file'
     with pytest.raises(Exception) as e:
-        ccpr.comment('1', content='foo', file='foo.txt', lineno=1)
-    assert str(e.value) == '''file 'foo.txt' not in list of PR files:
-[white]1] foo/bar.txt[/]'''
+        ccpr.comment('1', content='foo', file='foo.js', lineno=1)
+    assert str(e.value) == '''file 'foo.js' not in list of PR files:
+[white]1] foo/bar.txt[/]
+[white]2] foo/foo.txt[/]'''
 
 
 def test_diff(tmp_path):

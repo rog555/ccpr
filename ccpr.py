@@ -183,7 +183,6 @@ def json_serial(obj):
         return obj.isoformat().split('.')[0]
     if isinstance(obj, set):
         return list(obj)
-    raise TypeError('type not serializable')
 
 
 def jq(query, data):
@@ -195,7 +194,7 @@ def ccapi(method, **kwargs):
     'call boto3 codecommit and cache responses'
     kwargs = dict(kwargs)
     cache_secs = kwargs.pop('cache_secs', 20)
-    if 'cache_secs' in os.environ:
+    if 'CCPR_CACHE_SECS' in os.environ:
         cache_secs = int(os.environ['CCPR_CACHE_SECS'])
 
     join_key = kwargs.pop('_join_key', None)
@@ -444,6 +443,7 @@ def pr_files_completer(prefix, parsed_args, **kwargs):
     ))
     if isinstance(parsed_args, str):
         return (repo, files, before, after)
+    print(files)
     return [
         f for f in files if f.startswith(prefix)
     ]
@@ -779,4 +779,4 @@ def cli():
 
 
 if __name__ == '__main__':
-    cli()  # pragma: no cover
+    cli()

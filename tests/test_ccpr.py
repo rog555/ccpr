@@ -288,3 +288,11 @@ def test_diff(tmp_path):
    2     : - line2
         2: + line3
 '''
+
+
+@mock_boto3
+def test_cli():
+    ccpr.set_console(Console(file=StringIO()))
+    with patch.object(sys, 'argv', ['ccpr', 'r']):
+        ccpr.cli()
+    assert get_output() == _table(['name'], [['repo0'], ['repo1'], ['repo2']])

@@ -443,7 +443,6 @@ def pr_files_completer(prefix, parsed_args, **kwargs):
     ))
     if isinstance(parsed_args, str):
         return (repo, files, before, after)
-    print(files)
     return [
         f for f in files if f.startswith(prefix)
     ]

@@ -77,8 +77,8 @@ See https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html
 Eg: 
 
 ```
-export AWS_PROFILE=devops-account
-export AWS_REGION=us-east-1
+export AWS_DEFAULT_PROFILE=devops-account
+export AWS_DEFAULT_REGION=us-east-1
 ```
 
 ## Examples

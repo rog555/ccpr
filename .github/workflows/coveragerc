@@ -6,6 +6,7 @@ include =
 [report]
 exclude_lines =
     raise NotImplementedError.*
+    .*# pragma: no cover.*
 omit =
     tests/*
 

@@ -30,6 +30,7 @@ MOCK_OPERATIONS = {
         'ListRepositories',
         'ListPullRequests',
         'GetPullRequest',
+        'GetFolder',
         'EvaluatePullRequestApprovalRules',
         'GetDifferences',
         'GetBlob',
@@ -110,6 +111,30 @@ def mock_codecommit(operation_name, kwargs):
             if kwargs.get('pullRequestStatus') == 'CLOSED' else ['1', '2']
         }
 
+    elif operation_name == 'GetFolder':
+
+        def _f(f, bid):
+            return {'blobId': bid, 'absolutePath': f, 'fileMode': 'NORMAL'}
+
+        if kwargs.get('folderPath') == '/':
+            return {
+                'subFolders': [{
+                    'absolutePath': '/f1'
+                }],
+                'files': [
+                    _f('a.x', 'b1a'),
+                    _f('b.x', 'b1b'),
+                    _f('c.y', 'x1x')
+                ]
+            }
+        else:
+            return {
+                'subFolders': [],
+                'files': [
+                    _f('/f1/d.x', 'b2a')
+                ]
+            }
+
     elif operation_name == 'GetPullRequest':
         prid = kwargs['pullRequestId']
         response = {
@@ -179,7 +204,8 @@ def mock_codecommit(operation_name, kwargs):
             'content': {
                 'b1a': 'line1\nline2\nline3',
                 'b1b': 'line1\nliNe2\nline4\nline5',
-                'b2a': 'line1\nline2'
+                'b2a': 'line1\nline2',
+                'x1x': 'x1x'
             }[bid].encode('utf-8')
         }
 

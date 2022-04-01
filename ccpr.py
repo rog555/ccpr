@@ -20,12 +20,14 @@ from botocore.exceptions import ClientError
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import difflib
+from fnmatch import fnmatch
 import hashlib
 import inspect
 import jmespath
 import json
 import os
 import re
+
 from rich.console import Console
 from rich.prompt import Prompt
 from rich.rule import Rule
@@ -36,7 +38,7 @@ import tempfile
 import time
 import timeago
 
-__version__ = '0.0.1'
+__version__ = '0.0.2'
 
 EX = ThreadPoolExecutor(max_workers=5)
 BINARY_EXTS = ['.zip', '.docx', '.pptx']
@@ -208,9 +210,13 @@ def ccapi(method, **kwargs):
         fp = os.path.join(cache_dir, f)
         if not os.path.isfile(fp) or not fp.endswith('.cache'):
             continue  # pragma: no cover
-        if os.stat(fp).st_mtime < now - cache_secs:
-            # print('removing %s' % fp)
-            os.remove(fp)
+        # sometimes this fails when concurrent as already removed
+        try:
+            if os.stat(fp).st_mtime < now - cache_secs:
+                # print('removing %s' % fp)
+                os.remove(fp)
+        except Exception:  # pragma: no cover
+            pass
     cache_file = os.path.join(cache_dir, '%s-%s.cache' % (
         method,
         hashlib.sha256(json.dumps(dict(kwargs)).encode('UTF-8')).hexdigest()
@@ -717,9 +723,14 @@ def create(repo, title=None, branch=None):
         }],
         cache_secs=0
     )
-    get_console().print('[cyan]created PR [bold]%s[/]' % jq(
-        'pullRequest.pullRequestId', r
-    ))
+    pr_id = jq('pullRequest.pullRequestId', r)
+    get_console().print('[cyan]created PR [bold]%s[/]' % pr_id)
+    region = boto3.session.Session().region_name
+    url = (
+        'https://%s.console.aws.amazon.com/codesuite/codecommit'
+        + '/repositories/%s/pull-requests/%s/changes?region=%s'
+    ) % (region, repo, pr_id, region)
+    get_console().print('[cyan]link: [underline]%s[/][/]' % url)
 
 
 @arg('id', help='PR ID')
@@ -758,6 +769,105 @@ def comment(id, content, file=None, lineno=None):
     get_console().print('[cyan]%s[/]' % msg)
 
 
+@arg('str', help='string to grep')
+@arg('path', help='path within repo')
+@arg('-b', '--branch', help='defaults to master')
+@arg('-R', '--recursive', help='recursive search')
+@arg('-r', '--repo', help='comma sep list or current')
+@arg('-i', '--insensitive', help='case insensitive', action='store_true')
+@arg('-v', '--verbose', help='verbose', action='store_true')
+@aliases('g')
+def grep(
+    str, path, branch=None, repo=None,
+    recursive=False, insensitive=False, verbose=False
+):
+    'grep the remote repo(s)'
+    console = get_console(False)
+    if path in ['/', '.', '.*']:
+        path = '/*'
+    if not path.startswith('/'):
+        path = '/' + path
+    if branch is None:
+        branch = 'master'
+    (path, fpat) = os.path.split(path)
+    if repo is None:  # pragma: no cover
+        repo = CURRENT_REPO
+    if repo is None:  # pragma: no cover
+        fatal('--repo must be specified')
+
+    def _repo_prefix(r):
+        return '' if r == repo else '[cyan]%s[/]: ' % r
+
+    def _no_match(r, f):
+        if verbose is True:
+            console.print(
+                '%s[grey58]%s:    no match[/]' % (_repo_prefix(r), f)
+            )
+
+    def _file_grep(r, f_bid):
+        (f, bid) = f_bid
+        if bid is None:  # pragma: no cover
+            return _no_match(r, f)
+        f = '/' + f
+        lines = cc(
+            'get_blob', blobId=bid, repositoryName=r,
+            q='content',
+            cache_secs=120
+        )
+        if not isinstance(lines, bytes) or lines is None:  # pragma: no cover
+            return _no_match(r, f)
+        lines = lines.decode('utf-8')
+        match = False
+        for line in lines.split():
+            _str = str
+            if insensitive is True:
+                _str = _str.lower()
+                line = line.lower()
+            if _str in line:
+                line = line.replace(str, '[green]%s[/]' % str)
+                console.print('%s%s:    %s' % (_repo_prefix(r), f, line))
+                match = True
+        if match is False:
+            _no_match(r, f)
+        return
+
+    def _grep(r, f):
+        kwargs = {
+            'repositoryName': r,
+            'commitSpecifier': branch,
+            'folderPath': f,
+            'q': (
+                "[subFolders[].absolutePath,"
+                + "files[?fileMode=='NORMAL'].[absolutePath,blobId]]"
+            )
+        }
+        (dirs, _files) = cc('get_folder', **kwargs)
+        files = []
+        for f_bid in _files:
+            if fnmatch(f_bid[0], fpat) is False:
+                _no_match(r, f_bid[0])
+                continue
+            files.append(f_bid)
+        list(EX.map(lambda _: _file_grep(r, _), files))
+        if recursive is True and len(dirs) > 0:
+            list(EX.map(lambda _: _grep(r, _), dirs))
+        return
+
+    repos = []
+    if '?' in repo or '*' in repo or ',' in repo:
+        _repos = repo.split(',')
+        _all_repos = cc('list_repositories', q='repositories[].repositoryName')
+        for rpat in _repos:
+            for r in _all_repos:
+                if r == rpat or fnmatch(r, rpat):
+                    repos.append(r)
+    else:
+        repos = [repo]
+
+    for r in repos:
+        _grep(r, path)
+
+
 @aliases('d')
 def diff(file1, file2):
     'diff two local files'
@@ -771,7 +881,7 @@ def cli():
     parser = argh.ArghParser()
     parser.description = 'AWS CodeCommit PR CLI'
     parser.add_commands([
-        approve, create, close, comment, diff, merge, pr, prs, repos
+        approve, create, close, comment, diff, merge, pr, prs, repos, grep
     ])
     argh.completion.autocomplete(parser)
     parser.dispatch()

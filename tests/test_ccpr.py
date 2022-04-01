@@ -274,7 +274,11 @@ def test_create():
     os.environ['CCPR_CACHE_SECS'] = '0'
     ccpr.set_console(Console(file=StringIO()))
     ccpr.create('repo1', title='foobar', branch='foo')
-    assert get_output() == 'created PR 3\n'
+    region = 'us-east-1'
+    assert get_output() == '''created PR 3
+link: https://%s.console.aws.amazon.com/codesuite/codecommit/repositories
+/repo1/pull-requests/3/changes?region=%s
+''' % (region, region)
     with pytest.raises(Exception) as e:
         ccpr.create('repo1', title='foobar', branch='baz')
     assert str(e.value) == 'current branch baz not in repo repo1'
@@ -295,6 +299,28 @@ def test_comment():
     assert str(e.value) == '''file 'foo.js' not in list of PR files:
 [white]1] foo/bar.txt[/]
 [white]2] foo/foo.txt[/]'''
+
+
+@mock_boto3
+def test_grep():
+    os.environ['CCPR_CACHE_SECS'] = '0'
+    ccpr.set_console(Console(file=StringIO()))
+    ccpr.grep(
+        'liNe2', '*.x', repo='repo?,repox',
+        recursive=True, insensitive=False, verbose=False
+    )
+    ccpr.grep(
+        'liNe2', '.', repo='repo1',
+        recursive=False, insensitive=True, verbose=True
+    )
+    output = '\n'.join(sorted(get_output().splitlines()))
+    print(output)
+    assert output == '''/a.x:    line2
+/b.x:    line2
+/c.y:    no match
+repo0: /b.x:    liNe2
+repo1: /b.x:    liNe2
+repo2: /b.x:    liNe2'''
 
 
 def test_diff(tmp_path):

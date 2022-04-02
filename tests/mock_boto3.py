@@ -41,6 +41,9 @@ MOCK_OPERATIONS = {
         'ListBranches',
         'CreatePullRequest',
         'PostCommentForPullRequest'
+    ],
+    'mock_codepipeline': [
+        'GetPipelineState'
     ]
 }
 
@@ -261,5 +264,40 @@ def mock_codecommit(operation_name, kwargs):
 
     elif operation_name == 'PostCommentForPullRequest':
         response = {}
+
+    return response
+
+
+def mock_codepipeline(operation_name, kwargs):
+
+    response = None
+    user_arn = 'arn:aws:sts::123456789012:assumed-role/Developer/foo@bar.com'
+
+    if operation_name == 'GetPipelineState':
+
+        def _stage(name, status, summary='', error=None):
+            return {
+                'stageName': name,
+                'actionStates': [{
+                    'latestExecution': {
+                        'status': 'Succeeded',
+                        'lastStatusChange': datetime(2020, 1, 1),
+                        'summary': summary,
+                        'externalExecutionUrl': 'http://foo.bar',
+                        'errorDetails': {
+                            'message': error
+                        }
+                    }
+                }]
+            }
+
+        response = {
+            'stageStates': [
+                _stage('source', 'Succeeded', 'fix something'),
+                _stage('build', 'Succeeded'),
+                _stage('approve', 'Succeeded', 'Approved by %s' % user_arn),
+                _stage('test', 'Failed', error='ohno!')
+            ]
+        }
 
     return response

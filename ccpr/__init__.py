@@ -38,7 +38,7 @@ import tempfile
 import time
 import timeago
 
-__version__ = '0.0.1'
+__version__ = '1.0.0'
 
 EX = ThreadPoolExecutor(max_workers=5)
 BINARY_EXTS = ['.zip', '.docx', '.pptx']
@@ -195,13 +195,14 @@ def jq(query, data):
 def ccapi(method, **kwargs):
     'call boto3 codecommit and cache responses'
     kwargs = dict(kwargs)
+    _client = kwargs.pop('client', 'codecommit')
     cache_secs = kwargs.pop('cache_secs', 20)
     if 'CCPR_CACHE_SECS' in os.environ:
         cache_secs = int(os.environ['CCPR_CACHE_SECS'])
 
     join_key = kwargs.pop('_join_key', None)
     cache_dir = os.path.join(
-        tempfile.gettempdir(), 'codecommit-cli'
+        tempfile.gettempdir(), 'ccpr'
     )
     if not os.path.isdir(cache_dir):
         os.makedirs(cache_dir)  # pragma: no cover
@@ -227,7 +228,7 @@ def ccapi(method, **kwargs):
     else:
         r = None
         try:
-            r = getattr(boto3.client('codecommit'), method)(**kwargs)
+            r = getattr(boto3.client(_client), method)(**kwargs)
         except ClientError as e:
             fatal('unable to %s: %s' % (method, e))
         r.pop('ResponseMetadata', None)
@@ -868,6 +869,58 @@ def grep(
         _grep(r, path)
 
 
+@arg(
+    'repo',
+    completer=repos_completer,
+    nargs='?' if CURRENT_REPO else None,
+    default=CURRENT_REPO,
+    help='repo name'
+)
+@arg('-b', '--branch', help='defaults to master')
+@arg('-n', '--name', help='pipeline name')
+@arg('-m', '--master', help='use master branch', action='store_true')
+@aliases('p')
+def pipeline(repo, branch=None, name=None, master=False):
+    'show codepipeline status'
+
+    if master is True:
+        branch = 'master'
+
+    if name is None:
+        name = '%s_%s' % (repo, branch or current_branch())
+
+    r = cc(
+        'get_pipeline_state',
+        name=name,
+        client='codepipeline',
+        q='''stageStates[].{
+    stage: stageName,
+    status: actionStates[0].latestExecution.status,
+    updated: actionStates[0].latestExecution.lastStatusChange,
+    summary: actionStates[0].latestExecution.summary,
+    error: join('', [
+        '[red][link=',
+        actionStates[0].latestExecution.externalExecutionUrl || '',
+        ']',
+        actionStates[0].latestExecution.errorDetails.message || '',
+        '[/link][/]'
+    ])
+}'''
+    )
+
+    c1 = re.compile(r'(Approved by arn:aws:\S+)')
+    for i in range(len(r)):
+        _sum = r[i]['summary']
+        if _sum is None:
+            continue
+        for m in c1.findall(_sum):
+            u = '[green]%s[/]' % m.split('/')[-1]
+            r[i]['summary'] = _sum.replace(m, 'Approved by %s' % u)
+    ptable(r, ['stage', 'status', 'updated', 'summary', 'error'], colorize={
+        'status': ['Succeeded=green', 'InProgress=cyan', 'Failed=red']
+    })
+
+
 @aliases('d')
 def diff(file1, file2):
     'diff two local files'
@@ -881,7 +934,8 @@ def cli():
     parser = argh.ArghParser()
     parser.description = 'AWS CodeCommit PR CLI'
     parser.add_commands([
-        approve, create, close, comment, diff, merge, pr, prs, repos, grep
+        approve, create, close, comment, diff, grep,
+        merge, pipeline, pr, prs, repos
     ])
     argh.completion.autocomplete(parser)
     parser.dispatch()

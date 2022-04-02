@@ -323,6 +323,25 @@ repo1: /b.x:    liNe2
 repo2: /b.x:    liNe2'''
 
 
+@mock_boto3
+def test_pipeline():
+    os.environ['CCPR_CACHE_SECS'] = '0'
+    ccpr.set_console(Console(file=StringIO()))
+    ccpr.pipeline('repo1', master=True)
+    output = get_output()
+    print(output)
+    assert '\n' + output == '''
+┏━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┓
+┃ stage   ┃ status    ┃ updated             ┃ summary                 ┃ error ┃
+┡━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━┩
+│ source  │ Succeeded │ 2020-01-01T00:00:00 │ fix something           │       │
+│ build   │ Succeeded │ 2020-01-01T00:00:00 │                         │       │
+│ approve │ Succeeded │ 2020-01-01T00:00:00 │ Approved by foo@bar.com │       │
+│ test    │ Succeeded │ 2020-01-01T00:00:00 │                         │ ohno! │
+└─────────┴───────────┴─────────────────────┴─────────────────────────┴───────┘
+'''
+
+
 def test_diff(tmp_path):
     f1 = tmp_path / 'foo1.txt'
     f1.write_text('line1\nline2')

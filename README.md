@@ -1,6 +1,6 @@
 # AWS CodeCommit PR CLI
 
-The **ccpr** script attempts to replicate the basic AWS CodeCommit Console from the CLI when dealing with pull requests
+The **ccpr** script attempts to replicate the basic AWS CodeCommit Console from the CLI when dealing with pull requests.  It does abit more such as enable recursive remote repo searches and CodePipeline build status/linking
 
 This is achieved via context of current working git repo and branch, a bit of commandline completion and rich colours!
 
@@ -15,25 +15,23 @@ Using CodeCommit console in one account at same time as accessing console in ano
 
 ```
 usage: ccpr [-h]
-    {approve,a,create,c,close,x,comment,C,diff,d,merge,m,pr,id,prs,ls,repos,r,grep,g} ...
+    {approve,a,create,c,close,x,comment,C,diff,d,grep,g,merge,m,pipeline,p,pr,id,prs,ls,repos,r} ...
 
 AWS CodeCommit PR CLI
 
 positional arguments:
-  {approve,a,create,c,close,x,comment,C,diff,d,merge,m,pr,id,prs,ls,repos,r,grep,g}
+  {approve,a,create,c,close,x,comment,C,diff,d,grep,g,merge,m,pipeline,p,pr,id,prs,ls,repos,r}
     approve (a)         approve PR
     create (c)          create PR
     close (x)           close PR
     comment (C)         comment on PR, general if file and lineno not specified
     diff (d)            diff two local files
+    grep (g)            grep the remote repo(s)
     merge (m)           merge PR
+    pipeline (p)        show codepipeline status
     pr (id)             show details for specific PR (colorized diffs with comments etc)
     prs (ls)            list PRs for repo - OPEN by default
     repos (r)           list repos
-    grep (g)            grep the remote repo(s)
-
-optional arguments:
-  -h, --help            show this help message and exit
 ```
 
 ## Installation
@@ -143,6 +141,26 @@ $ ccpr grep -R -i baz '*.txt' --repo 'myrepo1,somerepo*'
 myrepo1: /folder1/somefile1.txt:    fooBar
 somerepo1: /folder1/somefile3.txt:    fooBar
 somerepo1: /folder2/somefile4.txt:    FOOBAR
+```
+
+
+### Show Code Pipeline status
+
+Depends how pipeline setup, but a sensible generic convention could be
+in format `<repo>_<branch>`, if not use the `--name` option
+
+Use `-m` for `master` branch, current repo will be used without `--name`
+
+```
+$ ccpr pipeline -m
+┏━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┓
+┃ stage   ┃ status    ┃ updated             ┃ summary                 ┃ error ┃
+┡━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━┩
+│ source  │ Succeeded │ 2020-01-01T00:00:00 │ fix something           │       │
+│ build   │ Succeeded │ 2020-01-01T00:00:00 │                         │       │
+│ approve │ Succeeded │ 2020-01-01T00:00:00 │ Approved by foo@bar.com │       │
+│ test    │ Succeeded │ 2020-01-01T00:00:00 │                         │ ohno! │
+└─────────┴───────────┴─────────────────────┴─────────────────────────┴───────┘
 ```
 
 ## License

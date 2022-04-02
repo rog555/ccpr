@@ -1,6 +1,6 @@
 argcomplete==1.12.3
 argh==0.26.2
-boto3==1.18.39
+boto3==1.21.31
 jmespath==0.10.0
 rich==10.9.0
 timeago==1.0.15

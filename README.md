@@ -8,31 +8,29 @@ This is achieved via context of current working git repo and branch, a bit of co
 
 Using CodeCommit console in one account at same time as accessing console in another account can be a pain (yes, maybe incognito could work..)  CLI access should allow for quicker workflow for creating/reviewing/approving and merging PRs
 
-[![Tests](https://github.com/rog555/codecommit-pr-cli/actions/workflows/tests.yml/badge.svg)](https://github.com/rog555/codecommit-pr-cli/actions/workflows/tests.yml/)
-[![Codecov](https://codecov.io/gh/rog555/codecommit-pr-cli/branch/main/graph/badge.svg)](https://codecov.io/gh/rog555/codecommit-pr-cli/branch/main)
+[![Tests](https://github.com/rog555/ccpr/actions/workflows/tests.yml/badge.svg)](https://github.com/rog555/ccpr/actions/workflows/tests.yml/)
+[![Codecov](https://codecov.io/gh/rog555/ccpr/branch/main/graph/badge.svg)](https://codecov.io/gh/rog555/ccpr/branch/main)
 
 ## Usage
 
 ```
 usage: ccpr [-h]
-            {approve,a,create,c,close,x,comment,C,diff,d,merge,m,pr,id,prs,ls,repos,r}
-            ...
+    {approve,a,create,c,close,x,comment,C,diff,d,merge,m,pr,id,prs,ls,repos,r,grep,g} ...
 
 AWS CodeCommit PR CLI
 
 positional arguments:
-  {approve,a,create,c,close,x,comment,C,diff,d,merge,m,pr,id,prs,ls,repos,r}
+  {approve,a,create,c,close,x,comment,C,diff,d,merge,m,pr,id,prs,ls,repos,r,grep,g}
     approve (a)         approve PR
     create (c)          create PR
     close (x)           close PR
-    comment (C)         comment on PR, general if file and lineno not
-                        specified
+    comment (C)         comment on PR, general if file and lineno not specified
     diff (d)            diff two local files
     merge (m)           merge PR
-    pr (id)             show details for specific PR (colorized diffs with
-                        comments etc)
-    prs (ls)            list PRs for repo
+    pr (id)             show details for specific PR (colorized diffs with comments etc)
+    prs (ls)            list PRs for repo - OPEN by default
     repos (r)           list repos
+    grep (g)            grep the remote repo(s)
 
 optional arguments:
   -h, --help            show this help message and exit
@@ -40,14 +38,8 @@ optional arguments:
 
 ## Installation
 
-Until ccpr is available on pip, clone this repo and then symlink ccpr.py to somewhere on your PATH
-
-Eg:
-
 ```
-$ git clone https://github.com/rog555/codecommit-pr-cli.git
-$ ln -s codecommit-pr-cli/ccpr.py /usr/local/bin/ccpr
-$ pip install -r codecommit-pr-cli/requirements.txt
+$ pip install ccpr
 ```
 
 ccpr uses argcomplete for commandline completion, see https://kislyuk.github.io/argcomplete/#installation
@@ -109,6 +101,7 @@ $ git branch
 $ ccpr create
 Enter PR title (foobar baz biz fiz):
 created PR 351
+link: https://us-east-1.console.aws.amazon.com/codesuite/codecommit/repositories/developer-tools/pull-requests/351/changes?region=us-east-1
 ```
 
 ### List PRs in current repo
@@ -141,6 +134,15 @@ some-file1.txt
    3     : - hij
         3: + xyz
         4: +
+```
+
+### Recursive grep across remote repos
+
+```
+$ ccpr grep -R -i baz '*.txt' --repo 'myrepo1,somerepo*'
+myrepo1: /folder1/somefile1.txt:    fooBar
+somerepo1: /folder1/somefile3.txt:    fooBar
+somerepo1: /folder2/somefile4.txt:    FOOBAR
 ```
 
 ## License

@@ -27,7 +27,7 @@ def read(*args):
 
 def get_version():
     """Reads the version from this module."""
-    init = read('codecommit_cli', '__init__.py')
+    init = read('ccpr', '__init__.py')
     return re.compile(
         r"""__version__ = ['"]([0-9.]+)['"]"""
     ).search(init).group(1)
@@ -48,7 +48,8 @@ setup(
     author='Roger Foskett',
     author_email='r_foskett@hotmail.com',
     license='Apache License 2.0',
-    packages=find_packages(),
+    include_package_data=True,
+    packages=find_packages(exclude=['tests']),
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: Apache Software License",
@@ -60,5 +61,5 @@ setup(
             'ccpr = ccpr:cli',
         ]
     },
-    url='https://github.com/rog555/codecommit-cli'
+    url='https://github.com/rog555/ccpr'
 )

@@ -38,7 +38,7 @@ import tempfile
 import time
 import timeago
 
-__version__ = '0.0.2'
+__version__ = '0.0.1'
 
 EX = ThreadPoolExecutor(max_workers=5)
 BINARY_EXTS = ['.zip', '.docx', '.pptx']

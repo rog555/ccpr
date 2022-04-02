@@ -146,4 +146,5 @@ somerepo1: /folder2/somefile4.txt:    FOOBAR
 ```
 
 ## License
+
 The license is Apache 2.0, see [LICENSE](./LICENSE) for the details.

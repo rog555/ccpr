@@ -38,7 +38,7 @@ import tempfile
 import time
 import timeago
 
-__version__ = '1.0.1'
+__version__ = '1.0.2'
 
 EX = ThreadPoolExecutor(max_workers=5)
 BINARY_EXTS = ['.zip', '.docx', '.pptx']
@@ -187,6 +187,8 @@ def ptable(
 
 
 def aws_link(path, _print=True, name=None):
+    if path is None:
+        return None  # pragma: no cover
     region = boto3.session.Session().region_name
     url = path
     if path.startswith('/'):

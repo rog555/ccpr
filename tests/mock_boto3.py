@@ -43,7 +43,8 @@ MOCK_OPERATIONS = {
         'PostCommentForPullRequest'
     ],
     'mock_codepipeline': [
-        'GetPipelineState'
+        'GetPipelineState',
+        'ListActionExecutions'
     ]
 }
 
@@ -275,15 +276,23 @@ def mock_codepipeline(operation_name, kwargs):
 
     if operation_name == 'GetPipelineState':
 
-        def _stage(name, status, summary='', error=None):
+        def _stage(
+            name, status, summary='', error=None,
+            pid='pid1234567890', url='http://foo.bar'
+        ):
             return {
                 'stageName': name,
+                'latestExecution': {
+                    'status': status,
+                    'pipelineExecutionId': pid
+                },
                 'actionStates': [{
+                    'actionName': name,
                     'latestExecution': {
-                        'status': 'Succeeded',
+                        'status': status,
                         'lastStatusChange': datetime(2020, 1, 1),
                         'summary': summary,
-                        'externalExecutionUrl': 'http://foo.bar',
+                        'externalExecutionUrl': url,
                         'errorDetails': {
                             'message': error
                         }
@@ -296,7 +305,45 @@ def mock_codepipeline(operation_name, kwargs):
                 _stage('source', 'Succeeded', 'fix something'),
                 _stage('build', 'Succeeded'),
                 _stage('approve', 'Succeeded', 'Approved by %s' % user_arn),
-                _stage('test', 'Failed', error='ohno!')
+                _stage('test', 'Failed', error='ohno!'),
+                _stage('deploy', 'InProgress', pid='pid999999999'),
+                _stage('deploy', 'Succeeded', pid='pid999999999')
+            ]
+        }
+
+    elif operation_name == 'ListActionExecutions':
+        pid = kwargs['filter']['pipelineExecutionId']
+
+        def _exec(
+            stage, category, owner='AWS', provider='CodeBuild',
+            url='http://foo.bar', summary='asummary'
+        ):
+            return {
+                'pipelineExecutionId': pid,
+                'stageName': stage,
+                'actionName': stage,
+                'lastUpdateTime': datetime(2020, 1, 1),
+                'output': {
+                    'executionResult': {
+                        'externalExecutionId': pid,
+                        'externalExecutionUrl': url,
+                        'externalExecutionSummary': summary
+                    }
+                },
+                'input': {
+                    'actionTypeId': {
+                        'owner': owner,
+                        'category': category,
+                        'provider': provider
+                    }
+                }
+            }
+
+        response = {
+            'actionExecutionDetails': [
+                _exec('source', 'Source'),
+                _exec('build', 'Build'),
+                _exec('deploy', 'Approval', provider='Manual')
             ]
         }
 

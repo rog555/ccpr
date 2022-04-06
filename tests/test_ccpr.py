@@ -44,6 +44,11 @@ def _table(columns, rows, title=None):
     return console.file.getvalue()
 
 
+def load_file(file):
+    with open(os.path.join(DATA_DIR, file), 'r') as fh:
+        return '\n'.join(fh.read().splitlines())
+
+
 def get_output():
     output = ccpr.get_console().file.getvalue()
     return '\n'.join(_.rstrip() for _ in output.splitlines()) + '\n'
@@ -149,7 +154,7 @@ def test_git_files(tmp_path):
 
 def test_json_serial():
     dt = datetime.now()
-    ts = dt.isoformat().split('.')[0]
+    ts = dt.isoformat().split('.')[0].replace('T', ' ')
     assert json.dumps({
         'a': dt,
         'b': 1,
@@ -327,19 +332,20 @@ repo2: /b.x:    liNe2'''
 def test_pipeline():
     os.environ['CCPR_CACHE_SECS'] = '0'
     ccpr.set_console(Console(file=StringIO()))
-    ccpr.pipeline('repo1', master=True)
-    output = get_output()
+    ccpr.pipeline('repo1', master=True, absolute=True)
+    output = '\n'.join(get_output().splitlines())
     print(output)
-    assert '\n' + output == '''
-┏━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┓
-┃ stage   ┃ status    ┃ updated             ┃ summary                 ┃ error ┃
-┡━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━┩
-│ source  │ Succeeded │ 2020-01-01T00:00:00 │ fix something           │       │
-│ build   │ Succeeded │ 2020-01-01T00:00:00 │                         │       │
-│ approve │ Succeeded │ 2020-01-01T00:00:00 │ Approved by foo@bar.com │       │
-│ test    │ Succeeded │ 2020-01-01T00:00:00 │                         │ ohno! │
-└─────────┴───────────┴─────────────────────┴─────────────────────────┴───────┘
-'''
+    assert output == load_file('pipeline.txt')
+
+
+@mock_boto3
+def test_pipeline_commits():
+    os.environ['CCPR_CACHE_SECS'] = '0'
+    ccpr.set_console(Console(file=StringIO()))
+    ccpr.pipeline('repo1', master=True, commits=True, absolute=True)
+    output = '\n'.join(get_output().splitlines())
+    print(output)
+    assert output == load_file('pipeline_commits.txt')
 
 
 def test_diff(tmp_path):

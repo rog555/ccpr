@@ -14,8 +14,7 @@ Using CodeCommit console in one account at same time as accessing console in ano
 ## Usage
 
 ```
-usage: ccpr [-h]
-    {approve,a,create,c,close,x,comment,C,diff,d,grep,g,merge,m,pipeline,p,pr,id,prs,ls,repos,r} ...
+usage: ccpr [-h] {approve,a,create,c,close,x,comment,C,diff,d,grep,g,merge,m,pipeline,p,pr,id,prs,ls,repos,r} ...
 
 AWS CodeCommit PR CLI
 
@@ -32,6 +31,9 @@ positional arguments:
     pr (id)             show details for specific PR (colorized diffs with comments etc)
     prs (ls)            list PRs for repo - OPEN by default
     repos (r)           list repos
+
+optional arguments:
+  -h, --help            show this help message and exit
 ```
 
 ## Installation
@@ -70,6 +72,8 @@ Eg:
 export AWS_DEFAULT_PROFILE=devops-account
 export AWS_DEFAULT_REGION=us-east-1
 ```
+
+If using SAML with Azure, then something like https://github.com/Versent/saml2aws might help
 
 ## Examples
 
@@ -151,16 +155,30 @@ in format `<repo>_<branch>`, if not use the `--name` option
 
 Use `-m` for `master` branch, current repo will be used without `--name`
 
+The `-c` argument will show commits which can be clicked on linking to AWS
+
+
 ```
-$ ccpr pipeline -m
-┏━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┓
-┃ stage   ┃ status    ┃ updated             ┃ summary                 ┃ error ┃
-┡━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━┩
-│ source  │ Succeeded │ 2020-01-01T00:00:00 │ fix something           │       │
-│ build   │ Succeeded │ 2020-01-01T00:00:00 │                         │       │
-│ approve │ Succeeded │ 2020-01-01T00:00:00 │ Approved by foo@bar.com │       │
-│ test    │ Succeeded │ 2020-01-01T00:00:00 │                         │ ohno! │
-└─────────┴───────────┴─────────────────────┴─────────────────────────┴───────┘
+$ ccpr pipeline -m -c
+link: https://us-east-1.console.aws.amazon.com/codesuite/codepipeline/pipelines/
+repo1_master/view?region=us-east-1
+┏━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━┓
+┃ stage   ┃ status     ┃ updated         ┃ commit    ┃ summary         ┃ error ┃
+┡━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━┩
+│ source  │ Succeeded  │ 2 hours ago     │ #34567890 │ fix something   │       │
+│ build   │ Succeeded  │ 2 hours ago     │ #34567890 │                 │       │
+│ approve │ Succeeded  │ 2 hours ago     │ #34567890 │ Approved by     │       │
+│ test    │ Failed     │ 2 hours ago     │ #34567890 │                 │ ohno! │
+│ deploy  │ InProgress │ 4 hours ago     │ #99999999 │ InProgress...   │       │
+│ deploy  │ Succeeded  │ 4 hours ago     │ #99999999 │                 │       │
+└─────────┴────────────┴─────────────────┴───────────┴─────────────────┴───────┘
+commits:
+┏━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━┓
+┃ # ┃ commit    ┃ updated             ┃ build     ┃ summary  ┃
+┡━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━┩
+│ 1 │ #34567890 │ 2020-01-01 00:00:00 │ #34567890 │ foo      │
+│ 2 │ #99999999 │ 2020-01-01 00:00:00 │ #99999999 │ bar      │
+└───┴───────────┴─────────────────────┴───────────┴──────────┘
 ```
 
 ## License

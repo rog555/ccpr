@@ -38,7 +38,7 @@ import tempfile
 import time
 import timeago
 
-__version__ = '1.0.0'
+__version__ = '1.0.1'
 
 EX = ThreadPoolExecutor(max_workers=5)
 BINARY_EXTS = ['.zip', '.docx', '.pptx']
@@ -72,6 +72,8 @@ def git_repo(path=None):
     (repo, git_path) = (None, None)
     for i in range(1, len(path_parts)):
         _path = os.path.join(os.sep, *list(path_parts[0:i+1]))
+        if "win" in sys.platform:
+            _path = _path.replace(":", ":" + os.sep)
         _git_path = os.path.join(_path, '.git')
         if os.path.isdir(_git_path):
             repo = path_parts[i]
@@ -85,7 +87,7 @@ def current_repo():
     return os.environ.get('CCPR_REPO', git_repo()[0])
 
 
-def current_branch():
+def current_branch(master_ok=False):
     'get current git branch'
     (repo, git_path) = git_repo()
     if not all([repo, git_path]):
@@ -98,7 +100,7 @@ def current_branch():
                 branch = line.split('/')[-1]
     if branch is None:
         fatal('no branch found in repo %s' % repo)
-    if branch in ['main', 'master']:
+    if master_ok is False and branch in ['main', 'master']:
         fatal('branch must not be main or master')
     return branch
 
@@ -125,7 +127,7 @@ CURRENT_REPO = current_repo()
 
 
 def ptable(
-    data, headers, title=None, colorize=None, counter=None, timeagos=[]
+    data, headers, title=None, colorize=None, counter=None, timeagos=None
 ):
     'print table using rich'
     if not isinstance(data, list):
@@ -144,6 +146,8 @@ def ptable(
     else:
         colorize = {}
 
+    if not isinstance(timeagos, list):
+        timeagos = []
     if counter is not None:
         table.add_column('#' if counter is True else '[%s]#' % counter)
 
@@ -164,25 +168,45 @@ def ptable(
         for attr, label in _headers.items():
             val = jq(attr, rd)
             if isinstance(val, datetime):
-                val = val.isoformat().split('.')[0]
+                val = dt_timestamp(val)
             elif val is None:
                 val = ''
             val = str(val)
-            if label in timeagos and val is not None:
+            if label in timeagos and val is not None and val.strip() != '':
                 val = timeago.format(val.replace('T', ' '), now)
             if label in colorize:
                 for pattern, color in colorize[label].items():
                     if re.match(pattern, val):
                         val = '[%s]%s' % (color, val)
                         break
+            if rd.get('_dim') is True:
+                val = '[dim]%s[/]' % val
             row.append(val)
         table.add_row(*row)
     get_console().print(table)
 
 
+def aws_link(path, _print=True, name=None):
+    region = boto3.session.Session().region_name
+    url = path
+    if path.startswith('/'):
+        url = 'https://%s.console.aws.amazon.com/codesuite' % region
+        url += path
+        url += ('?' if '?' not in path else '&') + 'region=' + region
+    if name is not None:
+        return '[link=%s]%s[/]' % (url, name)
+    if _print is True:
+        get_console().print('[cyan]link: [underline]%s[/][/]' % url)
+    return url
+
+
+def dt_timestamp(dt):
+    return dt.isoformat().split('.')[0].replace('T', ' ')
+
+
 def json_serial(obj):
     if isinstance(obj, datetime):
-        return obj.isoformat().split('.')[0]
+        return dt_timestamp(obj)
     if isinstance(obj, set):
         return list(obj)
 
@@ -726,12 +750,9 @@ def create(repo, title=None, branch=None):
     )
     pr_id = jq('pullRequest.pullRequestId', r)
     get_console().print('[cyan]created PR [bold]%s[/]' % pr_id)
-    region = boto3.session.Session().region_name
-    url = (
-        'https://%s.console.aws.amazon.com/codesuite/codecommit'
-        + '/repositories/%s/pull-requests/%s/changes?region=%s'
-    ) % (region, repo, pr_id, region)
-    get_console().print('[cyan]link: [underline]%s[/][/]' % url)
+    aws_link('/codecommit/repositories/%s/pull-requests/%s/changes' % (
+        repo, pr_id
+    ))
 
 
 @arg('id', help='PR ID')
@@ -879,46 +900,148 @@ def grep(
 @arg('-b', '--branch', help='defaults to master')
 @arg('-n', '--name', help='pipeline name')
 @arg('-m', '--master', help='use master branch', action='store_true')
+@arg('-c', '--commits', help='show commit history', action='store_true')
+@arg('-a', '--absolute', help='show absolute dates', action='store_true')
 @aliases('p')
-def pipeline(repo, branch=None, name=None, master=False):
+def pipeline(
+    repo, branch=None, name=None, master=False, commits=False, absolute=False
+):
     'show codepipeline status'
 
     if master is True:
         branch = 'master'
 
     if name is None:
-        name = '%s_%s' % (repo, branch or current_branch())
+        name = '%s_%s' % (repo, branch or current_branch(True))
 
     r = cc(
         'get_pipeline_state',
         name=name,
         client='codepipeline',
         q='''stageStates[].{
-    stage: stageName,
-    status: actionStates[0].latestExecution.status,
+    stage:   stageName,
+    status:  latestExecution.status,
     updated: actionStates[0].latestExecution.lastStatusChange,
     summary: actionStates[0].latestExecution.summary,
-    error: join('', [
-        '[red][link=',
-        actionStates[0].latestExecution.externalExecutionUrl || '',
-        ']',
-        actionStates[0].latestExecution.errorDetails.message || '',
-        '[/link][/]'
-    ])
+    _url:    actionStates[0].latestExecution.externalExecutionUrl,
+    _error:  actionStates[0].latestExecution.errorDetails.message,
+    _action: actionStates[0].actionName,
+    _exec:   actionStates[0].latestExecution,
+    _pid:    latestExecution.pipelineExecutionId
 }'''
     )
 
+    # get action executions for all pipeline executions in response
+    pids = {d['_pid']: {} for d in r}
+    # sum flattens list of lists
+    _action_executions = sum(EX.map(lambda _: cc(
+        'list_action_executions', pipelineName=name,
+        filter={'pipelineExecutionId': _},
+        client='codepipeline'
+    ), pids.keys()), [])
+
+    sources = {}
+    builds = {}
+    query = '''{
+        id: output.executionResult.externalExecutionId,
+        url: output.executionResult.externalExecutionUrl,
+        summary: output.executionResult.externalExecutionSummary,
+        updated: lastUpdateTime
+    }'''
+    for d in _action_executions:
+        pid = d['pipelineExecutionId']
+        stage = d['stageName']
+        action = d['actionName']
+        if stage not in pids[pid]:
+            pids[pid][stage] = {}
+        _input = jq('input.actionTypeId.[owner, category, provider]', d)
+        pids[pid][stage][action] = ' '.join(_input)
+        if _input[1] == 'Source':
+            sources[pid] = jq(query, d)
+        elif _input[1] == 'Build':
+            builds[pid] = jq(query, d)
+
     c1 = re.compile(r'(Approved by arn:aws:\S+)')
+    dim = False
+    has_error = False
+    last_commit = None
+
     for i in range(len(r)):
-        _sum = r[i]['summary']
-        if _sum is None:
-            continue
-        for m in c1.findall(_sum):
+
+        # replace iam arn with user
+        summary = (r[i]['summary'] or '').strip()
+        for m in c1.findall(summary):
             u = '[green]%s[/]' % m.split('/')[-1]
-            r[i]['summary'] = _sum.replace(m, 'Approved by %s' % u)
-    ptable(r, ['stage', 'status', 'updated', 'summary', 'error'], colorize={
-        'status': ['Succeeded=green', 'InProgress=cyan', 'Failed=red']
-    })
+            summary = summary.replace(m, 'Approved by %s' % u)
+
+        # add error column
+        r[i]['error'] = None
+        if r[i]['_error'] is not None:
+            r[i]['error'] = aws_link(r[i]['_url'], name=r[i]['_error'])
+            has_error = True
+
+        # add commit link
+        source = sources.get(r[i]['_pid'])
+        if source is not None:
+            r[i]['commit'] = (
+                aws_link(source['url'], name='#' + source['id'][-8:])
+            )
+
+        # update summary with action and dim subsequent records
+        _status = r[i]['status']
+        if _status in ['InProgress', 'Failed']:
+            # construct query to lookup the input.actionTypeId from pids
+            _summary = jq(
+                '.'.join(
+                    ['"%s"' % r[i][a] for a in ['_pid', 'stage', '_action']]
+                ),
+                pids
+            )
+            if _summary == 'AWS Approval Manual':
+                (_color, _summary) = (
+                    ('cyan', 'InProgress') if _status == 'InProgress' else
+                    ('red', 'Rejected')
+                )
+                summary += '%s[%s italic]%s%s[/]' % (
+                    ' ' if summary != '' else '',
+                    _color,
+                    _summary,
+                    '...' if _status == 'InProgress' else ''
+                )
+
+        r[i]['summary'] = summary
+        if last_commit is not None and source['id'] != last_commit:
+            dim = True
+        if dim is True:
+            r[i]['_dim'] = True
+        last_commit = source['id']
+
+    timeagos = None if absolute is True else ['updated']
+    aws_link('/codepipeline/pipelines/%s/view' % name)
+    headers = ['stage', 'status', 'updated', 'commit', 'summary']
+    if has_error is True:
+        headers += ['error']
+    ptable(r, headers, colorize={
+        'status': ['Succeeded=green', 'InProgress=cyan', 'Failed=red'],
+        'error': ['.*=red']
+    }, timeagos=timeagos)
+
+    if commits is True:
+        data = [{
+            'commit': aws_link(
+                sources[pid]['url'], name='#' + sources[pid]['id'][-8:]
+            ),
+            'build': aws_link(
+                builds[pid]['url'], name='#' + builds[pid]['id'][-8:]
+            ),
+            'updated': sources[pid]['updated'],
+            'summary': sources[pid]['summary']
+        } for pid in sources.keys()]
+        get_console().print('commits:')
+        ptable(
+            data, ['commit', 'updated', 'build', 'summary'], counter=True,
+            timeagos=timeagos
+        )
 
 
 @aliases('d')
